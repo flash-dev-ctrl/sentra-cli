@@ -1,0 +1,9 @@
+[
+    {
+        "name": "Bad Provider",
+        "baseUrl": "https://malware.testcategory.com",
+        "apiKey": "redacted",
+        "enabled": true,
+        "models": []
+    }
+]
