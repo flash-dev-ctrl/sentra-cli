@@ -1,0 +1,252 @@
+stages:
+  - release
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - when: never
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_SUBMODULE_FORCE_HTTPS: "true"
+  GIT_SUBMODULE_DEPTH: "1"
+  CARGO_TERM_COLOR: always
+  RUSTUP_DIST_SERVER: "https://rsproxy.cn"
+  RUSTUP_UPDATE_ROOT: "https://rsproxy.cn/rustup"
+  RUSTUP_MAX_RETRIES: "3"
+  ZIG_VERSION: "0.16.0"
+
+.linux_cross_base:
+  image: rust:1-bookworm
+  stage: release
+  timeout: 2h
+  cache:
+    key: "cargo-linux-cross"
+    unprotect: true
+    when: always
+    paths:
+      - .cache/cargo
+      - .cache/rustup
+      - .tools
+      - target
+  before_script:
+    - |
+      set -euo pipefail
+      export CARGO_HOME="$CI_PROJECT_DIR/.cache/cargo"
+      export RUSTUP_HOME="$CI_PROJECT_DIR/.cache/rustup"
+      export CARGO_TARGET_DIR="$CI_PROJECT_DIR/target"
+      export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$CI_PROJECT_DIR/.tools/zig:$PATH"
+      mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$CI_PROJECT_DIR/.tools"
+
+      cat > "$CARGO_HOME/config.toml" <<'EOF'
+      [source.crates-io]
+      replace-with = "rsproxy-sparse"
+
+      [source.rsproxy-sparse]
+      registry = "sparse+https://rsproxy.cn/index/"
+
+      [net]
+      git-fetch-with-cli = true
+      EOF
+
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        ca-certificates curl file pkg-config xz-utils unzip
+
+      if ! command -v zig >/dev/null 2>&1; then
+        arch="$(uname -m)"
+        case "$arch" in
+          x86_64|amd64) zig_arch="x86_64" ;;
+          aarch64|arm64) zig_arch="aarch64" ;;
+          *) echo "unsupported host architecture: $arch" >&2; exit 2 ;;
+        esac
+        zig_dir="$CI_PROJECT_DIR/.tools/zig-${zig_arch}-linux-${ZIG_VERSION}"
+        if [ ! -x "$zig_dir/zig" ]; then
+          curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz" \
+            | tar -xJ -C "$CI_PROJECT_DIR/.tools"
+        fi
+        test -x "$zig_dir/zig"
+        ln -sfn "$zig_dir" "$CI_PROJECT_DIR/.tools/zig"
+        export PATH="$CI_PROJECT_DIR/.tools/zig:$PATH"
+      fi
+
+      rustup set profile minimal
+      rustup default stable
+      rustup target add "$RUST_TARGET"
+
+      if ! command -v cargo-zigbuild >/dev/null 2>&1; then
+        cargo install cargo-zigbuild
+      fi
+
+      rustc --version
+      cargo --version
+      zig version
+      cargo zigbuild --version
+  script:
+    - |
+      set -euo pipefail
+      export CARGO_HOME="$CI_PROJECT_DIR/.cache/cargo"
+      export RUSTUP_HOME="$CI_PROJECT_DIR/.cache/rustup"
+      export CARGO_TARGET_DIR="$CI_PROJECT_DIR/target"
+      export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$CI_PROJECT_DIR/.tools/zig:$PATH"
+
+      echo "Building sentra for $RUST_TARGET"
+      case "$RUST_TARGET" in
+        *windows*) export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static" ;;
+      esac
+      cargo zigbuild --release --target "$RUST_TARGET" --bin sentra
+
+      case "$RUST_TARGET" in
+        *windows*) artifact="sentra.exe" ;;
+        *) artifact="sentra" ;;
+      esac
+      mkdir -p "dist/$RUST_TARGET"
+      cp "$CARGO_TARGET_DIR/$RUST_TARGET/release/$artifact" "dist/$RUST_TARGET/$artifact"
+
+      if [ "$artifact" = "sentra" ] && [ -x "dist/$RUST_TARGET/$artifact" ]; then
+        file "dist/$RUST_TARGET/$artifact"
+      fi
+      if [[ "$RUST_TARGET" == *unknown-linux-musl ]]; then
+        file "dist/$RUST_TARGET/$artifact" | grep -q "statically linked"
+      fi
+  artifacts:
+    name: "sentra-$RUST_TARGET-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    when: always
+    expire_in: 14 days
+    paths:
+      - dist/$RUST_TARGET/
+
+.macos_cross_base:
+  stage: release
+  tags:
+    - macos2
+  timeout: 2h
+  cache:
+    key: "cargo-macos-cross"
+    unprotect: true
+    when: always
+    paths:
+      - .cache/cargo
+      - .cache/rustup
+      - target
+  before_script:
+    - |
+      set -euo pipefail
+      export CARGO_HOME="$CI_PROJECT_DIR/.cache/cargo"
+      export RUSTUP_HOME="$CI_PROJECT_DIR/.cache/rustup"
+      export CARGO_TARGET_DIR="$CI_PROJECT_DIR/target"
+      export PATH="$CARGO_HOME/bin:$HOME/.cargo/bin:$PATH"
+      mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
+
+      cat > "$CARGO_HOME/config.toml" <<'EOF'
+      [source.crates-io]
+      replace-with = "rsproxy-sparse"
+
+      [source.rsproxy-sparse]
+      registry = "sparse+https://rsproxy.cn/index/"
+
+      [net]
+      git-fetch-with-cli = true
+      EOF
+
+      if ! command -v rustup >/dev/null 2>&1; then
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+        export PATH="$CARGO_HOME/bin:$HOME/.cargo/bin:$PATH"
+      fi
+
+      rustup set profile minimal
+      rustup default stable
+      rustup target add "$RUST_TARGET"
+
+      rustc --version
+      cargo --version
+  script:
+    - |
+      set -euo pipefail
+      export CARGO_HOME="$CI_PROJECT_DIR/.cache/cargo"
+      export RUSTUP_HOME="$CI_PROJECT_DIR/.cache/rustup"
+      export CARGO_TARGET_DIR="$CI_PROJECT_DIR/target"
+      export PATH="$CARGO_HOME/bin:$HOME/.cargo/bin:$PATH"
+
+      echo "Building sentra for $RUST_TARGET"
+      cargo build --release --target "$RUST_TARGET" --bin sentra
+
+      mkdir -p "dist/$RUST_TARGET"
+      cp "$CARGO_TARGET_DIR/$RUST_TARGET/release/sentra" "dist/$RUST_TARGET/sentra"
+      file "dist/$RUST_TARGET/sentra"
+  artifacts:
+    name: "sentra-$RUST_TARGET-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    when: always
+    expire_in: 14 days
+    paths:
+      - dist/$RUST_TARGET/
+
+.windows_rules:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH =~ /^dev/'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH'
+      when: manual
+      allow_failure: true
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+    - when: never
+
+.manual_or_tag_rules:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH'
+      when: manual
+      allow_failure: true
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+    - when: never
+
+release:windows:x86_64:
+  extends:
+    - .linux_cross_base
+    - .windows_rules
+  variables:
+    RUST_TARGET: "x86_64-pc-windows-gnu"
+
+release:windows:aarch64:
+  extends:
+    - .linux_cross_base
+    - .windows_rules
+  variables:
+    RUST_TARGET: "aarch64-pc-windows-gnullvm"
+
+release:linux:x86_64:
+  extends:
+    - .linux_cross_base
+    - .manual_or_tag_rules
+  variables:
+    RUST_TARGET: "x86_64-unknown-linux-musl"
+
+release:linux:aarch64:
+  extends:
+    - .linux_cross_base
+    - .manual_or_tag_rules
+  variables:
+    RUST_TARGET: "aarch64-unknown-linux-musl"
+
+release:macos:x86_64:
+  extends:
+    - .macos_cross_base
+    - .manual_or_tag_rules
+  variables:
+    RUST_TARGET: "x86_64-apple-darwin"
+
+release:macos:aarch64:
+  extends:
+    - .macos_cross_base
+    - .manual_or_tag_rules
+  variables:
+    RUST_TARGET: "aarch64-apple-darwin"
