@@ -56,8 +56,8 @@ fn main() {
 
 async fn run(args: Vec<OsString>) -> SentraResult<()> {
     let command = args::parse_args(args)?;
-    execute(&command).await?;
     updater::maybe_prompt_auto_update(&command).await;
+    execute(&command).await?;
     Ok(())
 }
 

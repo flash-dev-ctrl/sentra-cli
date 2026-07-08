@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crossterm::cursor::MoveUp;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::execute;
+use crossterm::terminal::{self, Clear, ClearType};
 use sentra_lib::config::sentra_home;
 use sentra_lib::{SentraError, SentraResult};
 use serde::{Deserialize, Serialize};
@@ -195,23 +199,148 @@ fn prompt_update_choice(latest: &str) -> AutoUpdateChoice {
         current_version(),
         latest
     );
-    eprint!(
-        "{} ",
+    eprintln!(
+        "{}",
         t(
-            "Update now? [y]es / [l]ater / [s]kip today:",
-            "立即更新？[y]立即 / [l]稍后提醒 / [s]今天不提示:"
+            "Update now? Use ↑/↓ and Enter, or press y/l/s:",
+            "立即更新？使用 ↑/↓ 和 Enter，或按 y/l/s:"
         )
     );
-    let _ = io::stderr().flush();
 
-    let mut input = String::new();
-    if io::stdin().read_line(&mut input).is_err() {
+    let options = update_choice_options();
+    let mut selected = 0usize;
+    render_update_choice_options(&options, selected);
+
+    let Ok(_raw_mode) = RawModeGuard::new() else {
         return AutoUpdateChoice::Later;
+    };
+
+    loop {
+        match read_key_event() {
+            Ok(KeyEvent {
+                code: KeyCode::Up, ..
+            })
+            | Ok(KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
+            }) => {
+                selected = selected.saturating_sub(1);
+                redraw_update_choice_options(&options, selected);
+            }
+            Ok(KeyEvent {
+                code: KeyCode::Down,
+                ..
+            })
+            | Ok(KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            }) => {
+                selected = (selected + 1).min(options.len().saturating_sub(1));
+                redraw_update_choice_options(&options, selected);
+            }
+            Ok(KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            }) => return options[selected].choice,
+            Ok(KeyEvent {
+                code: KeyCode::Char('y'),
+                ..
+            })
+            | Ok(KeyEvent {
+                code: KeyCode::Char('Y'),
+                ..
+            }) => return AutoUpdateChoice::UpdateNow,
+            Ok(KeyEvent {
+                code: KeyCode::Char('l'),
+                ..
+            })
+            | Ok(KeyEvent {
+                code: KeyCode::Char('L'),
+                ..
+            }) => return AutoUpdateChoice::Later,
+            Ok(KeyEvent {
+                code: KeyCode::Char('s'),
+                ..
+            })
+            | Ok(KeyEvent {
+                code: KeyCode::Char('S'),
+                ..
+            }) => return AutoUpdateChoice::SkipToday,
+            Ok(KeyEvent {
+                code: KeyCode::Esc, ..
+            }) => return AutoUpdateChoice::Later,
+            Err(_) => return AutoUpdateChoice::Later,
+            _ => {}
+        }
     }
-    match input.trim().to_ascii_lowercase().as_str() {
-        "y" | "yes" | "u" | "update" => AutoUpdateChoice::UpdateNow,
-        "s" | "skip" | "today" => AutoUpdateChoice::SkipToday,
-        _ => AutoUpdateChoice::Later,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UpdateChoiceOption {
+    label: &'static str,
+    choice: AutoUpdateChoice,
+}
+
+fn update_choice_options() -> [UpdateChoiceOption; 3] {
+    [
+        UpdateChoiceOption {
+            label: t("Yes, update now", "是，立即更新"),
+            choice: AutoUpdateChoice::UpdateNow,
+        },
+        UpdateChoiceOption {
+            label: t("Later", "稍后提醒"),
+            choice: AutoUpdateChoice::Later,
+        },
+        UpdateChoiceOption {
+            label: t("Skip today", "今天不提示"),
+            choice: AutoUpdateChoice::SkipToday,
+        },
+    ]
+}
+
+fn render_update_choice_options(options: &[UpdateChoiceOption], selected: usize) {
+    for (index, option) in options.iter().enumerate() {
+        let marker = if index == selected { ">" } else { " " };
+        eprintln!("  {marker} {}", option.label);
+    }
+    let _ = io::stderr().flush();
+}
+
+fn redraw_update_choice_options(options: &[UpdateChoiceOption], selected: usize) {
+    let mut stderr = io::stderr();
+    let _ = execute!(
+        stderr,
+        MoveUp(options.len() as u16),
+        Clear(ClearType::FromCursorDown)
+    );
+    render_update_choice_options(options, selected);
+}
+
+fn read_key_event() -> SentraResult<KeyEvent> {
+    loop {
+        if let Event::Key(key) =
+            event::read().map_err(|err| SentraError::Message(err.to_string()))?
+        {
+            if key.kind == KeyEventKind::Press {
+                return Ok(key);
+            }
+        }
+    }
+}
+
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn new() -> SentraResult<Self> {
+        terminal::enable_raw_mode().map_err(|err| SentraError::Message(err.to_string()))?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+        eprintln!();
     }
 }
 
