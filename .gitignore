@@ -1,0 +1,5 @@
+/target
+/dist
+/install.cmd
+/openai-codex/
+/rules/yara/chaitin/

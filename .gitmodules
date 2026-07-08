@@ -1,0 +1,4 @@
+[submodule "sentra-lib"]
+	path = sentra-lib
+	url = ../sentra-lib.git
+	branch = rs
