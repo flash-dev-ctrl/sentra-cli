@@ -26,12 +26,14 @@ mod skill;
 mod skill_inventory;
 #[path = "cli/skill_manager.rs"]
 mod skill_manager;
+#[path = "cli/updater.rs"]
+mod updater;
 
 use std::ffi::OsString;
 
 use sentra_lib::SentraResult;
 
-use args::Command;
+use args::{Command, UpdateTarget};
 
 fn main() {
     let (args, language) = i18n::strip_language_args(std::env::args_os().skip(1).collect());
@@ -53,7 +55,14 @@ fn main() {
 }
 
 async fn run(args: Vec<OsString>) -> SentraResult<()> {
-    match args::parse_args(args)? {
+    let command = args::parse_args(args)?;
+    execute(&command).await?;
+    updater::maybe_prompt_auto_update(&command).await;
+    Ok(())
+}
+
+async fn execute(command: &Command) -> SentraResult<()> {
+    match command {
         Command::Help => {
             args::print_help();
             Ok(())
@@ -96,7 +105,7 @@ async fn run(args: Vec<OsString>) -> SentraResult<()> {
             output,
         } => {
             config::initialize()?;
-            list::run(resource, agent.as_deref(), output).await
+            list::run(*resource, agent.as_deref(), output.clone()).await
         }
         Command::Scan {
             resource,
@@ -107,27 +116,45 @@ async fn run(args: Vec<OsString>) -> SentraResult<()> {
             output,
         } => {
             config::initialize()?;
-            scan::run(resource, path, agents, enabled_checkers, no_cache, output).await
+            scan::run(
+                *resource,
+                path.clone(),
+                agents.clone(),
+                enabled_checkers.clone(),
+                *no_cache,
+                output.clone(),
+            )
+            .await
         }
         Command::Import { sources } => {
             config::initialize()?;
-            import::run(sources)
+            import::run(sources.clone())
         }
         Command::Config { action } => {
             config::initialize()?;
-            config::run(action)
+            config::run(action.clone())
         }
         Command::Rule { action } => {
             config::initialize()?;
-            config::run_rule(action)
+            config::run_rule(action.clone())
         }
-        Command::Update => {
+        Command::Update { target } => {
             config::initialize()?;
-            config::update_rules()
+            match target {
+                UpdateTarget::Auto => {
+                    if config::has_rule_sources()? {
+                        config::update_rules()
+                    } else {
+                        updater::manual_update().await
+                    }
+                }
+                UpdateTarget::Cli => updater::manual_update().await,
+                UpdateTarget::Rules => config::update_rules(),
+            }
         }
         Command::Model { action } => {
             config::initialize()?;
-            model::run(action).await
+            model::run(action.clone()).await
         }
         Command::SkillAdd {
             source,
@@ -136,13 +163,19 @@ async fn run(args: Vec<OsString>) -> SentraResult<()> {
             force,
         } => {
             config::initialize()?;
-            skill::add(source, agents, enabled_checkers, force).await
+            skill::add(
+                source.clone(),
+                agents.clone(),
+                enabled_checkers.clone(),
+                *force,
+            )
+            .await
         }
         Command::SkillList => {
             config::initialize()?;
             skill::list().await
         }
-        Command::Install { agent } => install::run(agent),
-        Command::Uninstall { agent } => install::run_uninstall(agent),
+        Command::Install { agent } => install::run(agent.clone()),
+        Command::Uninstall { agent } => install::run_uninstall(agent.clone()),
     }
 }

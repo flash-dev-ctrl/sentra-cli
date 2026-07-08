@@ -129,6 +129,20 @@ pub(crate) fn update_rules() -> SentraResult<()> {
     update(&home)
 }
 
+pub(crate) fn has_rule_sources() -> SentraResult<bool> {
+    let home = home::home_dir().ok_or_else(|| {
+        SentraError::Message(
+            t(
+                "could not determine current user home",
+                "无法确定当前用户主目录",
+            )
+            .to_string(),
+        )
+    })?;
+    let config = load_json_config(&home)?;
+    Ok(!rule_sources(&config).is_empty())
+}
+
 fn print_rule_help() {
     println!(
         "{}",
@@ -138,7 +152,7 @@ Usage:
   sentra rule get
   sentra rule set rule_<name> <url>
   sentra rule del rule_<name> [url]
-  sentra update
+  sentra update rules
 
 Description:
   View, modify, and update Sentra rule sources.
@@ -147,13 +161,13 @@ Examples:
   sentra rule get
   sentra rule set rule_public https://example.test/rules.zip
   sentra rule del rule_public https://example.test/rules.zip
-  sentra update",
+  sentra update rules",
             "\
 用法:
   sentra rule get
   sentra rule set rule_<名称> <url>
   sentra rule del rule_<名称> [url]
-  sentra update
+  sentra update rules
 
 说明:
   查看、修改并更新 Sentra 规则来源。
@@ -162,7 +176,7 @@ Examples:
   sentra rule get
   sentra rule set rule_public https://example.test/rules.zip
   sentra rule del rule_public https://example.test/rules.zip
-  sentra update"
+  sentra update rules"
         )
     );
 }

@@ -41,7 +41,9 @@ pub(crate) enum Command {
     Rule {
         action: RuleAction,
     },
-    Update,
+    Update {
+        target: UpdateTarget,
+    },
     Model {
         action: ModelAction,
     },
@@ -149,6 +151,13 @@ pub(crate) enum RuleAction {
     Get,
     Set { key: String, value: String },
     Del { key: String, value: Option<String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpdateTarget {
+    Auto,
+    Cli,
+    Rules,
 }
 
 pub(crate) fn parse_args(args: Vec<OsString>) -> SentraResult<Command> {
@@ -339,14 +348,26 @@ fn parse_update(args: &[OsString]) -> SentraResult<Command> {
     if args.first().is_some_and(is_help) || args.iter().skip(1).any(is_help) {
         return Ok(Command::UpdateHelp);
     }
-    if let Some(arg) = args.first() {
+    let target = match args.first().map(|arg| arg.to_string_lossy()) {
+        None => UpdateTarget::Auto,
+        Some(action) if action == "rules" || action == "rule" => UpdateTarget::Rules,
+        Some(action) if action == "self" || action == "cli" => UpdateTarget::Cli,
+        Some(arg) => {
+            return Err(SentraError::Message(format!(
+                "{}: {}",
+                t("unknown update argument", "未知更新参数"),
+                arg
+            )));
+        }
+    };
+    if args.len() > 1 {
         return Err(SentraError::Message(format!(
             "{}: {}",
             t("unknown update argument", "未知更新参数"),
-            arg.to_string_lossy()
+            args[1].to_string_lossy()
         )));
     }
-    Ok(Command::Update)
+    Ok(Command::Update { target })
 }
 
 fn parse_skill(args: &[OsString]) -> SentraResult<Command> {
@@ -701,7 +722,28 @@ mod tests {
         ));
 
         let update = parse_args(os_args(&["update"])).unwrap();
-        assert!(matches!(update, Command::Update));
+        assert!(matches!(
+            update,
+            Command::Update {
+                target: UpdateTarget::Auto
+            }
+        ));
+
+        let update_cli = parse_args(os_args(&["update", "self"])).unwrap();
+        assert!(matches!(
+            update_cli,
+            Command::Update {
+                target: UpdateTarget::Cli
+            }
+        ));
+
+        let update_rules = parse_args(os_args(&["update", "rules"])).unwrap();
+        assert!(matches!(
+            update_rules,
+            Command::Update {
+                target: UpdateTarget::Rules
+            }
+        ));
     }
 }
 
@@ -1083,7 +1125,7 @@ Commands:
   scan     Scan skills and other assets for risks
   import   Import local or remote rule files
   rule     View and modify rule sources
-  update   Download and import configured rule sources
+  update   Update Sentra CLI or configured rule sources
   config   View and modify Sentra configuration
   model    View and modify model providers
   skill    Install skills
@@ -1104,7 +1146,7 @@ Use 'sentra <command> --help' for command-specific usage.",
   scan      扫描技能和其他资产风险
   import    导入本地或远程规则文件
   rule      查看和修改规则来源
-  update    下载并导入已配置的规则来源
+  update    更新 Sentra CLI 或已配置的规则来源
   config    查看和修改 Sentra 配置
   model     查看和修改模型供应商
   skill     安装技能
@@ -1321,31 +1363,43 @@ pub(crate) fn print_update_help() {
             "\
 Usage:
   sentra update
+  sentra update self
+  sentra update rules
 
 Description:
-  Download and import configured rule sources.
+  Update configured rule sources when present; otherwise update Sentra CLI to the latest GitHub release.
+  Use 'sentra update self' to update Sentra CLI explicitly.
+  Use 'sentra update rules' to download and import configured rule sources.
   Configure sources with: sentra rule set rule_<name> <url>
 
 Options:
   -h, --help  Show help
 
 Examples:
+  sentra update
+  sentra update self
   sentra rule set rule_public https://example.test/rules.zip
-  sentra update",
+  sentra update rules",
             "\
 用法:
   sentra update
+  sentra update self
+  sentra update rules
 
 说明:
-  下载并导入已配置的规则来源。
+  已配置规则来源时更新规则，否则将 Sentra CLI 更新到 GitHub 最新版本。
+  使用 'sentra update self' 显式更新 Sentra CLI。
+  使用 'sentra update rules' 下载并导入已配置的规则来源。
   使用以下命令配置来源: sentra rule set rule_<名称> <url>
 
 选项:
   -h, --help  显示帮助
 
 示例:
+  sentra update
+  sentra update self
   sentra rule set rule_public https://example.test/rules.zip
-  sentra update"
+  sentra update rules"
         )
     );
 }
