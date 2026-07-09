@@ -283,3 +283,11 @@ def test_failed_jobs_include_direct_logs_endpoint(monkeypatch):
             "logs_endpoint": "repos/openai/codex/actions/jobs/555/logs",
         }
     ]
+
+
+def test_default_state_file_uses_system_temp_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(gh_pr_watch.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    path = gh_pr_watch.default_state_file_for(sample_pr())
+
+    assert path == tmp_path / "codex-babysit-pr-openai-codex-pr123.json"
