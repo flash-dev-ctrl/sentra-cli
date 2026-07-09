@@ -11,8 +11,10 @@ use sentra_lib::config::sentra_home;
 use sentra_lib::{SentraError, SentraResult};
 use serde::{Deserialize, Serialize};
 
-use crate::args::{Command, ModelAction, OutputFormat, OutputOptions, UpdateTarget};
-use crate::i18n::t;
+use crate::cli::args::{Command, ModelAction, OutputFormat, OutputOptions, UpdateTarget};
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::t;
+use crate::tui::theme::{AnsiStyle, paint};
 
 const REPO: &str = "flash-dev-ctrl/sentra-cli";
 const INSTALL_SH_URL: &str =
@@ -68,7 +70,10 @@ pub(crate) async fn maybe_prompt_auto_update(command: &Command) {
     match prompt_update_choice(&latest.tag) {
         AutoUpdateChoice::UpdateNow => {
             if let Err(err) = install_version(&latest.tag).await {
-                eprintln!("{}: {err}", t("update failed", "更新失败"));
+                feedback::status_line(
+                    Status::Error,
+                    format!("{}: {err}", t("update failed", "更新失败")),
+                );
                 state.next_check_at = next_time(CHECK_INTERVAL);
                 let _ = save_state(&state_path, &state);
             }
@@ -87,18 +92,19 @@ pub(crate) async fn maybe_prompt_auto_update(command: &Command) {
 pub(crate) async fn manual_update() -> SentraResult<()> {
     let latest = latest_release().await?;
     if !is_newer_version(&latest.tag, current_version()) {
-        println!(
-            "{} {}",
-            t("Sentra is already up to date:", "Sentra 已是最新版本:"),
-            current_version()
+        feedback::result(
+            Status::Success,
+            t("Sentra is already up to date", "Sentra 已是最新版本"),
+            &[(t("Version", "版本"), current_version().to_string())],
         );
         return Ok(());
     }
-    println!(
-        "{} {} -> {}",
-        t("Updating Sentra", "正在更新 Sentra"),
-        current_version(),
-        latest.tag
+    feedback::context(
+        t("Update Sentra", "更新 Sentra"),
+        &[
+            (t("Current", "当前版本"), current_version().to_string()),
+            (t("Latest", "最新版本"), latest.tag.clone()),
+        ],
     );
     install_version(&latest.tag).await
 }
@@ -193,17 +199,22 @@ enum AutoUpdateChoice {
 
 fn prompt_update_choice(latest: &str) -> AutoUpdateChoice {
     eprintln!();
-    eprintln!(
-        "{} {} -> {}",
-        t("A new Sentra version is available:", "发现 Sentra 新版本:"),
-        current_version(),
-        latest
+    feedback::context(
+        t("New Sentra version available", "发现 Sentra 新版本"),
+        &[
+            (t("Current", "当前版本"), current_version().to_string()),
+            (t("Latest", "最新版本"), latest.to_string()),
+        ],
     );
     eprintln!(
         "{}",
-        t(
-            "Update now? Use ↑/↓ and Enter, or press y/l/s:",
-            "立即更新？使用 ↑/↓ 和 Enter，或按 y/l/s:"
+        paint(
+            t(
+                "Update now? Use ↑/↓ and Enter, or press y/l/s:",
+                "立即更新？使用 ↑/↓ 和 Enter，或按 y/l/s:"
+            ),
+            AnsiStyle::Foreground,
+            feedback::terminal_symbols(),
         )
     );
 
@@ -301,7 +312,22 @@ fn update_choice_options() -> [UpdateChoiceOption; 3] {
 fn render_update_choice_options(options: &[UpdateChoiceOption], selected: usize) {
     for (index, option) in options.iter().enumerate() {
         let marker = if index == selected { ">" } else { " " };
-        eprintln!("  {marker} {}", option.label);
+        let color = feedback::terminal_symbols();
+        let marker_style = if index == selected {
+            AnsiStyle::Accent
+        } else {
+            AnsiStyle::Muted
+        };
+        let label_style = if index == selected {
+            AnsiStyle::Foreground
+        } else {
+            AnsiStyle::Secondary
+        };
+        eprintln!(
+            "  {} {}",
+            paint(marker, marker_style, color),
+            paint(option.label, label_style, color)
+        );
     }
     let _ = io::stderr().flush();
 }
@@ -439,7 +465,7 @@ fn escape_powershell_single_quoted(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::{ListResource, OutputOptions};
+    use crate::cli::args::{ListResource, OutputOptions};
 
     #[test]
     fn compares_release_versions_with_v_prefix() {

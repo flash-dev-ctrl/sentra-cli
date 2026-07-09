@@ -9,9 +9,10 @@ use sentra_lib::risks::types::{CheckerConfig, LlmConfig, OnlineTiConfig, ScanCac
 use sentra_lib::risks::{RiskScanner, RuleDirectoryConfig, RuleLoadSummary, RuleType, ScanOptions};
 use sentra_lib::{SentraError, SentraResult};
 
-use crate::args::ScanChecker;
-use crate::bundled_rules::ensure_bundled_rules;
-use crate::i18n::t;
+use crate::cli::args::ScanChecker;
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::t;
+use crate::core::bundled_rules::ensure_bundled_rules;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuleLoadOutput {
@@ -219,7 +220,7 @@ pub(crate) fn scan_progress_message(
     let percent = progress_percent(current, total);
     format!(
         "{} {item_label} {current}/{total} ({percent}%): {name}",
-        t("scanning", "正在扫描")
+        t("Scan", "扫描")
     )
 }
 
@@ -233,15 +234,18 @@ pub(crate) fn emit_scan_progress(
     previous_width: &mut usize,
 ) -> SentraResult<()> {
     if !interactive {
-        eprintln!(
-            "{}",
-            scan_progress_message(item_label, current, total, name)
+        feedback::phase(
+            Status::Running,
+            scan_progress_message(item_label, current, total, name),
         );
         return Ok(());
     }
 
     let percent = progress_percent(current, total);
-    let message = format!("{tty_label} {current}/{total} ({percent}%) {name}");
+    let message = format!(
+        "  {} {tty_label} {current}/{total} ({percent}%) {name}",
+        Status::Running.symbol()
+    );
     let padding = previous_width.saturating_sub(message.len());
     *previous_width = message.len();
     let mut stderr = std::io::stderr().lock();
@@ -274,7 +278,10 @@ fn load_rules_with_progress(
                 write_rule_load_progress(current, total, rule_type, &mut previous_width)?;
             }
             RuleLoadOutput::Plain => {
-                eprintln!("{}", rule_load_progress_message(current, total, rule_type));
+                feedback::phase(
+                    Status::Running,
+                    rule_load_progress_message(current, total, rule_type),
+                );
             }
             RuleLoadOutput::Silent => {}
         }
@@ -290,7 +297,7 @@ fn load_rules_with_progress(
                 .map_err(|err| SentraError::io(None, err))?;
         }
         RuleLoadOutput::Plain => {
-            eprintln!("{message}");
+            feedback::phase(Status::Success, message);
         }
         RuleLoadOutput::Silent => {}
     }
@@ -313,6 +320,7 @@ fn write_rule_load_progress(
     previous_width: &mut usize,
 ) -> SentraResult<()> {
     let message = rule_load_progress_message(current, total, rule_type);
+    let message = format!("  {} {message}", Status::Running.symbol());
     let padding = previous_width.saturating_sub(message.len());
     *previous_width = message.len();
     let mut stderr = std::io::stderr().lock();
@@ -330,22 +338,22 @@ pub(crate) fn rule_load_progress_message(
     let stage = rule_load_stage_label(rule_type);
     format!(
         "{} {current}/{total} ({percent}%): {stage}",
-        t("Loading risk rules", "正在加载风险规则")
+        t("Load risk rules", "加载风险规则")
     )
 }
 
 fn rule_load_stage_label(rule_type: RuleType) -> &'static str {
     match rule_type {
-        RuleType::Yara => t("loading YARA rules", "加载 YARA 规则"),
-        RuleType::ThreatIntel => t("loading threat intel rules", "加载威胁情报规则"),
-        RuleType::Hash => t("loading hash rules", "加载哈希规则"),
+        RuleType::Yara => t("Load YARA rules", "加载 YARA 规则"),
+        RuleType::ThreatIntel => t("Load threat intel rules", "加载威胁情报规则"),
+        RuleType::Hash => t("Load hash rules", "加载哈希规则"),
     }
 }
 
 pub(crate) fn rule_load_summary_message(summary: &RuleLoadSummary) -> String {
     format!(
         "{}: yara={} ti={} hash={}",
-        t("loaded risk rules", "已加载风险规则"),
+        t("Risk rules loaded", "风险规则已加载"),
         summary.yara,
         summary.ti_ips + summary.ti_domains,
         summary.hash_blacklist + summary.hash_whitelist
@@ -369,6 +377,7 @@ pub(crate) fn finish_scan_progress(
         plural_label
     };
     let message = format!("{} {total} {label}", t("Scanned", "已扫描"));
+    let message = format!("  {} {message}", Status::Success.symbol());
     let padding = previous_width.saturating_sub(message.len());
     let mut stderr = std::io::stderr().lock();
     writeln!(stderr, "\r{message}{}", " ".repeat(padding)).map_err(|err| SentraError::io(None, err))
