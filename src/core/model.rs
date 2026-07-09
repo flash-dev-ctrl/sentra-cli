@@ -2142,10 +2142,7 @@ mod tests {
 
     #[test]
     fn add_gateway_uses_models_from_new_gateway_not_existing_gateway_union() {
-        let server = run_probe_server(
-            200,
-            r#"{"data":[{"id":"fresh-gpt"},{"id":"fresh-mini"}]}"#,
-        );
+        let server = run_probe_server(200, r#"{"data":[{"id":"fresh-gpt"},{"id":"fresh-mini"}]}"#);
         let base_url = server.base_url.clone();
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
