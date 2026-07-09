@@ -6,19 +6,19 @@ fn cli_does_not_depend_on_binding_dtos() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut source = String::new();
 
-    for entry in fs::read_dir(root.join("src")).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-            source.push_str(&fs::read_to_string(path).unwrap());
-        }
-    }
+    let mut pending = vec![root.join("src")];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
 
-    for entry in fs::read_dir(root.join("src/cli")).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            source.push_str(&fs::read_to_string(path).unwrap());
+            if path.extension().is_some_and(|ext| ext == "rs") {
+                source.push_str(&fs::read_to_string(path).unwrap());
+            }
         }
     }
 

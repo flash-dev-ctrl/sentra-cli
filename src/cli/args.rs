@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use sentra_lib::interfaces::AssetType;
 use sentra_lib::{SentraError, SentraResult};
 
-use crate::i18n::t;
+use crate::cli::i18n::t;
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -1121,19 +1121,19 @@ Usage:
   sentra <command> [args...]
 
 Commands:
-  list     List discovered assets and agents
-  scan     Scan skills and other assets for risks
-  import   Import local or remote rule files
-  rule     View and modify rule sources
-  update   Update Sentra CLI or configured rule sources
-  config   View and modify Sentra configuration
-  model    View and modify model providers
-  skill    Install skills
-  install  Install or update an agent CLI
-  uninstall Uninstall an agent CLI
+  list       List discovered assets and agents
+  scan       Scan skills and other assets for risks
+  import     Import local or remote rule files
+  rule       View and modify rule sources
+  update     Update Sentra CLI or configured rule sources
+  config     View and modify Sentra configuration
+  model      View and modify model providers
+  skill      Install skills
+  install    Install or update an agent CLI
+  uninstall  Uninstall an agent CLI
 
 Options:
-  -h, --help  Show help
+  -h, --help      Show help
   --lang <en|zh>  Display language
 
 Use 'sentra <command> --help' for command-specific usage.",
@@ -1142,16 +1142,16 @@ Use 'sentra <command> --help' for command-specific usage.",
   sentra <命令> [参数...]
 
 命令:
-  list      列出发现的资产和 Agent
-  scan      扫描技能和其他资产风险
-  import    导入本地或远程规则文件
-  rule      查看和修改规则来源
-  update    更新 Sentra CLI 或已配置的规则来源
-  config    查看和修改 Sentra 配置
-  model     查看和修改模型供应商
-  skill     安装技能
-  install   安装或更新 Agent CLI
-  uninstall 卸载 Agent CLI
+  list       列出发现的资产和 Agent
+  scan       扫描技能和其他资产风险
+  import     导入本地或远程规则文件
+  rule       查看和修改规则来源
+  update     更新 Sentra CLI 或已配置的规则来源
+  config     查看和修改 Sentra 配置
+  model      查看和修改模型供应商
+  skill      安装技能
+  install    安装或更新 Agent CLI
+  uninstall  卸载 Agent CLI
 
 选项:
   -h, --help      显示帮助

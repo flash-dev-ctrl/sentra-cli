@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use sentra_lib::{SentraError, SentraResult};
 use unicode_width::UnicodeWidthStr;
 
-use crate::args::{OutputFormat, OutputOptions};
-use crate::i18n::{t, yes_no};
+use crate::cli::args::{OutputFormat, OutputOptions};
+use crate::cli::i18n::{t, yes_no};
+use crate::tui::theme::{AnsiStyle, paint, severity_ansi_style};
 
 pub(crate) fn print_json<T: serde::Serialize>(value: T) -> SentraResult<()> {
     let json = serde_json::to_string_pretty(&value)
@@ -40,7 +41,7 @@ pub(crate) fn write_output<T: serde::Serialize>(
     }
 }
 
-fn write_stdout(content: &str) -> SentraResult<()> {
+pub(crate) fn write_stdout(content: &str) -> SentraResult<()> {
     let mut stdout = io::stdout().lock();
     if let Err(err) = write!(stdout, "{content}") {
         if err.kind() == io::ErrorKind::BrokenPipe {
@@ -52,7 +53,11 @@ fn write_stdout(content: &str) -> SentraResult<()> {
 }
 
 fn should_color(options: &OutputOptions) -> bool {
-    options.output.is_none() && io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+    options.output.is_none() && stdout_color_enabled()
+}
+
+pub(crate) fn stdout_color_enabled() -> bool {
+    io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
 }
 
 fn format_terminal(title: &str, value: &serde_json::Value, color: bool) -> String {
@@ -60,18 +65,18 @@ fn format_terminal(title: &str, value: &serde_json::Value, color: bool) -> Strin
         return format_scan_results(value, color);
     }
     if title == "Agents" {
-        return format_agents(value);
+        return format_agents(value, color);
     }
     if title == "Assets" {
-        return format_assets(value);
+        return format_assets(value, color);
     }
     if title == "Models" {
-        return format_models(value);
+        return format_models(value, color);
     }
     format_generic(title, value)
 }
 
-fn format_agents(value: &serde_json::Value) -> String {
+fn format_agents(value: &serde_json::Value, semantic_symbols: bool) -> String {
     let Some(items) = value.as_array() else {
         return format_generic("Agents", value);
     };
@@ -83,14 +88,29 @@ fn format_agents(value: &serde_json::Value) -> String {
             string_field(item, "home"),
         ]);
     }
-    format_table(
-        &format!("{} ({})", t("Agents", "Agent"), rows.len()),
-        &[t("NAME", "名称"), t("TITLE", "标题"), t("HOME", "目录")],
-        rows,
+    format_list_view(
+        t("List agents", "列出 Agent"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("agent(s) discovered", "个 Agent 已发现")
+        ),
+        &format!(
+            "{} `sentra list skill` {} `sentra scan skill`",
+            t("Next:", "下一步:"),
+            t("or", "或")
+        ),
+        format_table(
+            &format!("{} ({})", t("Agents", "Agent"), rows.len()),
+            &[t("NAME", "名称"), t("TITLE", "标题"), t("HOME", "目录")],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
     )
 }
 
-fn format_assets(value: &serde_json::Value) -> String {
+fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
     let Some(items) = value.as_array() else {
         return format_generic("Assets", value);
     };
@@ -100,16 +120,28 @@ fn format_assets(value: &serde_json::Value) -> String {
         .and_then(|value| value.as_str())
         .unwrap_or("asset");
     match asset_type {
-        "provider" => format_provider_assets(items),
-        "skill" => format_skill_assets(items),
-        "mcp" => format_named_asset_items(t("MCP Servers", "MCP 服务"), items, "MCP"),
-        "memory" => format_named_asset_items(t("Memories", "记忆"), items, t("MEMORY", "记忆")),
-        "cron" => format_named_asset_items(t("Crons", "定时任务"), items, t("CRON", "定时")),
+        "provider" => format_provider_assets(items, semantic_symbols),
+        "skill" => format_skill_assets(items, semantic_symbols),
+        "mcp" => format_named_asset_items(
+            "mcp",
+            t("MCP Servers", "MCP 服务"),
+            items,
+            "MCP",
+            semantic_symbols,
+        ),
+        "memory" => format_named_asset_items(
+            "memory",
+            t("Memories", "记忆"),
+            items,
+            t("MEMORY", "记忆"),
+            semantic_symbols,
+        ),
+        "cron" => format_cron_assets(items, semantic_symbols),
         _ => format_generic("Assets", value),
     }
 }
 
-fn format_provider_assets(items: &[serde_json::Value]) -> String {
+fn format_provider_assets(items: &[serde_json::Value], semantic_symbols: bool) -> String {
     let mut rows = Vec::new();
     for item in items {
         let agent = string_field(item, "agentName");
@@ -123,20 +155,41 @@ fn format_provider_assets(items: &[serde_json::Value]) -> String {
             ]);
         }
     }
-    format_table(
-        &format!("{} ({})", t("Providers", "供应商"), rows.len()),
-        &[
-            t("AGENT", "AGENT"),
-            t("PROVIDER", "供应商"),
-            t("ENABLED", "启用"),
-            t("MODELS", "模型"),
-            t("BASE URL", "BASE URL"),
-        ],
-        rows,
+    format_list_view(
+        t("List providers", "列出供应商"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("provider(s) discovered", "个供应商已发现")
+        ),
+        &format!(
+            "{} `sentra model` {} `sentra scan provider`",
+            t("Next:", "下一步:"),
+            t("or", "或")
+        ),
+        format_table(
+            &format!("{} ({})", t("Providers", "供应商"), rows.len()),
+            &[
+                t("AGENT", "AGENT"),
+                t("PROVIDER", "供应商"),
+                t("ENABLED", "启用"),
+                t("MODELS", "模型"),
+                t("BASE URL", "BASE URL"),
+            ],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
     )
 }
 
-fn format_named_asset_items(title: &str, items: &[serde_json::Value], item_header: &str) -> String {
+fn format_named_asset_items(
+    resource: &str,
+    title: &str,
+    items: &[serde_json::Value],
+    item_header: &str,
+    semantic_symbols: bool,
+) -> String {
     let mut rows = Vec::new();
     for item in items {
         let agent = string_field(item, "agentName");
@@ -152,14 +205,71 @@ fn format_named_asset_items(title: &str, items: &[serde_json::Value], item_heade
             ]);
         }
     }
-    format_table(
-        &format!("{title} ({})", rows.len()),
-        &[t("AGENT", "AGENT"), item_header, t("DESCRIPTION", "描述")],
-        rows,
+    format_list_view(
+        &format!("{} {resource}", t("List", "列出")),
+        &format!("{title}: {}", rows.len()),
+        &format!(
+            "{} `sentra scan {resource}` {} `sentra list agent`",
+            t("Next:", "下一步:"),
+            t("or", "或")
+        ),
+        format_table(
+            &format!("{title} ({})", rows.len()),
+            &[t("AGENT", "AGENT"), item_header, t("DESCRIPTION", "描述")],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
     )
 }
 
-fn format_skill_assets(items: &[serde_json::Value]) -> String {
+fn format_cron_assets(items: &[serde_json::Value], semantic_symbols: bool) -> String {
+    let mut rows = Vec::new();
+    for item in items {
+        let agent = string_field(item, "agentName");
+        for data in data_items(item) {
+            rows.push(vec![
+                agent.clone(),
+                data.get("name")
+                    .or_else(|| data.get("id"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("-")
+                    .to_string(),
+                enabled_label(data),
+                string_field(data, "schedule"),
+                display_text_field(data, &["prompt", "description"]),
+            ]);
+        }
+    }
+    format_list_view(
+        t("List cron tasks", "列出定时任务"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("cron task(s) discovered", "个定时任务已发现")
+        ),
+        &format!(
+            "{} `sentra scan cron` {} `sentra list agent`",
+            t("Next:", "下一步:"),
+            t("or", "或")
+        ),
+        format_table(
+            &format!("{} ({})", t("Crons", "定时任务"), rows.len()),
+            &[
+                t("AGENT", "AGENT"),
+                t("CRON", "定时"),
+                t("ENABLED", "启用"),
+                t("SCHEDULE", "调度"),
+                t("PROMPT", "提示词"),
+            ],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
+    )
+}
+
+fn format_skill_assets(items: &[serde_json::Value], semantic_symbols: bool) -> String {
     let mut rows = Vec::new();
     for item in items {
         let agent = string_field(item, "agentName");
@@ -174,11 +284,69 @@ fn format_skill_assets(items: &[serde_json::Value]) -> String {
             ]);
         }
     }
-    format_table(
-        &format!("{} ({})", t("Skills", "技能"), rows.len()),
-        &[t("AGENT", "AGENT"), t("SKILL", "技能")],
-        rows,
+    format_list_view(
+        t("List skills", "列出技能"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("skill(s) discovered", "个技能已发现")
+        ),
+        &format!(
+            "{} `sentra skill` {} `sentra scan skill`",
+            t("Next:", "下一步:"),
+            t("or", "或")
+        ),
+        format_table(
+            &format!("{} ({})", t("Skills", "技能"), rows.len()),
+            &[t("AGENT", "AGENT"), t("SKILL", "技能")],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
     )
+}
+
+fn format_list_view(
+    title: &str,
+    result: &str,
+    next: &str,
+    table: String,
+    semantic_symbols: bool,
+) -> String {
+    let mut output = String::new();
+    output.push_str(&paint(
+        if semantic_symbols { "●" } else { "[INFO]" },
+        AnsiStyle::Purple,
+        semantic_symbols,
+    ));
+    output.push(' ');
+    output.push_str(&paint(title, AnsiStyle::Foreground, semantic_symbols));
+    output.push('\n');
+    output.push_str(&paint(
+        if semantic_symbols { "✓" } else { "[OK]" },
+        AnsiStyle::Green,
+        semantic_symbols,
+    ));
+    output.push(' ');
+    output.push_str(&paint(result, AnsiStyle::Foreground, semantic_symbols));
+    output.push_str("\n\n");
+    output.push_str(&table);
+    output.push('\n');
+    output.push_str(&format_next_step(next, semantic_symbols));
+    output.push('\n');
+    output
+}
+
+fn format_next_step(next: &str, color: bool) -> String {
+    if let Some((label, rest)) = next.split_once(':') {
+        format!(
+            "{}{}",
+            paint(&format!("{label}:"), AnsiStyle::Muted, color),
+            paint(rest, AnsiStyle::Secondary, color)
+        )
+    } else {
+        paint(next, AnsiStyle::Secondary, color)
+    }
 }
 
 fn format_scan_results(value: &serde_json::Value, color: bool) -> String {
@@ -213,7 +381,7 @@ struct ScanTerminalRenderer {
 }
 
 impl ScanTerminalRenderer {
-    const RULE: &'static str = "════════════════════════════════════════════════════════════";
+    const RULE: &'static str = "────────────────────────────────────────────────────────────";
     const SUMMARY_WIDTHS: [usize; 6] = [10, 8, 8, 8, 8, 8];
 
     fn new(color: bool) -> Self {
@@ -233,7 +401,7 @@ impl ScanTerminalRenderer {
 
     fn rule(&mut self, style: Option<AnsiStyle>) {
         match style {
-            Some(style) => self.output.push_str(&styled(Self::RULE, style, self.color)),
+            Some(style) => self.output.push_str(&paint(Self::RULE, style, self.color)),
             None => self.output.push_str(Self::RULE),
         }
         self.output.push('\n');
@@ -278,19 +446,20 @@ impl ScanTerminalRenderer {
             }
         }
 
-        self.rule(Some(AnsiStyle::DarkGray));
         let risky_style = if risky_items.is_empty() {
             AnsiStyle::Green
         } else {
-            AnsiStyle::RedBold
+            AnsiStyle::DangerBold
         };
-        self.output.push_str(&styled(
-            t("Audit Summary", "审计摘要"),
-            AnsiStyle::CyanBold,
+        self.output.push_str(&paint(
+            t("Audit complete", "审计完成"),
+            AnsiStyle::Green,
             self.color,
         ));
-        self.output.push_str(t("  Risky assets:", "  风险资产:"));
-        self.output.push_str(&styled(
+        self.output.push('\n');
+        self.output
+            .push_str(&format!("  {}: ", t("Risky assets", "风险资产")));
+        self.output.push_str(&paint(
             &risky_items.len().to_string(),
             risky_style,
             self.color,
@@ -300,11 +469,21 @@ impl ScanTerminalRenderer {
             items.len(),
             t("(risky/total)", "(风险/总数)")
         ));
+        if by_asset.is_empty() {
+            self.output.push_str(&format!(
+                "  {}: {}\n",
+                t("Findings", "发现"),
+                t("none", "无")
+            ));
+            return;
+        }
+        self.blank();
+        self.output
+            .push_str(&format!("{}\n", t("Findings by asset", "按资产汇总发现")));
         self.summary_header();
         for (asset_type, counts) in by_asset {
             self.summary_asset_row(&asset_type, counts);
         }
-        self.rule(Some(AnsiStyle::DarkGray));
     }
 
     fn summary_header(&mut self) {
@@ -319,11 +498,11 @@ impl ScanTerminalRenderer {
             ],
             &[
                 None,
-                Some(AnsiStyle::RedBold),
-                Some(AnsiStyle::LightRed),
-                Some(AnsiStyle::YellowBold),
+                Some(AnsiStyle::DangerBold),
+                Some(AnsiStyle::High),
+                Some(AnsiStyle::WarningBold),
                 Some(AnsiStyle::Blue),
-                Some(AnsiStyle::Cyan),
+                Some(AnsiStyle::Accent),
             ],
         );
     }
@@ -339,11 +518,11 @@ impl ScanTerminalRenderer {
         ];
         let styles = [
             None,
-            Some(summary_count_style(counts[0], AnsiStyle::RedBold)),
-            Some(summary_count_style(counts[1], AnsiStyle::LightRed)),
-            Some(summary_count_style(counts[2], AnsiStyle::YellowBold)),
+            Some(summary_count_style(counts[0], AnsiStyle::DangerBold)),
+            Some(summary_count_style(counts[1], AnsiStyle::High)),
+            Some(summary_count_style(counts[2], AnsiStyle::WarningBold)),
             Some(summary_count_style(counts[3], AnsiStyle::Blue)),
-            Some(summary_count_style(counts[4], AnsiStyle::Cyan)),
+            Some(summary_count_style(counts[4], AnsiStyle::Accent)),
         ];
         self.summary_cells(&cells, &styles);
     }
@@ -359,12 +538,12 @@ impl ScanTerminalRenderer {
                 " ".repeat(Self::SUMMARY_WIDTHS[index].saturating_sub(display_width(cell)));
             match styles.get(index).and_then(|style| *style) {
                 Some(style) if index == 0 => {
-                    self.output.push_str(&styled(cell, style, self.color));
+                    self.output.push_str(&paint(cell, style, self.color));
                     self.output.push_str(&padding);
                 }
                 Some(style) => {
                     self.output.push_str(&padding);
-                    self.output.push_str(&styled(cell, style, self.color));
+                    self.output.push_str(&paint(cell, style, self.color));
                 }
                 None if index == 0 => {
                     self.output.push_str(cell);
@@ -384,7 +563,7 @@ impl ScanTerminalRenderer {
         let severity_label = severity_label(&severity);
         self.output.push_str(&format!(
             "  {index} {}\n",
-            styled(severity_label, severity_ansi_style(&severity), self.color)
+            paint(severity_label, severity_ansi_style(&severity), self.color)
         ));
         self.detail_field(t("Severity", "严重性"), severity_label);
         self.detail_field(t("Title", "标题"), &string_field(finding, "title"));
@@ -402,7 +581,7 @@ impl ScanTerminalRenderer {
             t("Evidence", "证据"),
             finding,
             "evidence",
-            AnsiStyle::Yellow,
+            AnsiStyle::Warning,
         );
         self.optional_detail_field(t("Remediation", "修复建议"), finding, "remediation");
         self.context_detail(finding);
@@ -441,7 +620,7 @@ impl ScanTerminalRenderer {
         if let Some(text) = value.get(key).and_then(|value| value.as_str())
             && !text.trim().is_empty()
         {
-            self.detail_field(label, &styled(text, style, self.color));
+            self.detail_field(label, &paint(text, style, self.color));
         }
     }
 
@@ -482,7 +661,7 @@ impl ScanTerminalRenderer {
         let rendered = format!("  {marker} {number} | {text}");
         if line.is_target {
             self.output
-                .push_str(&styled(&rendered, AnsiStyle::YellowBold, self.color));
+                .push_str(&paint(&rendered, AnsiStyle::WarningBold, self.color));
         } else {
             self.output.push_str(&rendered);
         }
@@ -524,7 +703,7 @@ fn count_or_dot(count: usize) -> String {
 
 fn summary_count_style(count: usize, severity_style: AnsiStyle) -> AnsiStyle {
     if count == 0 {
-        AnsiStyle::DarkGray
+        AnsiStyle::Muted
     } else {
         severity_style
     }
@@ -698,7 +877,7 @@ fn highlight_evidence(text: &str, evidence: Option<&str>, color: bool) -> String
     format!(
         "{}{}{}",
         &text[..start],
-        styled(&text[start..end], AnsiStyle::RedBold, color),
+        paint(&text[start..end], AnsiStyle::DangerBold, color),
         &text[end..]
     )
 }
@@ -710,50 +889,7 @@ struct ContextLine {
     is_target: bool,
 }
 
-#[derive(Clone, Copy)]
-enum AnsiStyle {
-    Blue,
-    Cyan,
-    CyanBold,
-    DarkGray,
-    Green,
-    LightRed,
-    Magenta,
-    RedBold,
-    Yellow,
-    YellowBold,
-}
-
-fn severity_ansi_style(severity: &str) -> AnsiStyle {
-    match severity {
-        "CRITICAL" => AnsiStyle::RedBold,
-        "HIGH" => AnsiStyle::RedBold,
-        "MEDIUM" => AnsiStyle::YellowBold,
-        "LOW" => AnsiStyle::Yellow,
-        _ => AnsiStyle::Magenta,
-    }
-}
-
-fn styled(value: &str, style: AnsiStyle, color: bool) -> String {
-    if !color {
-        return value.to_string();
-    }
-    let code = match style {
-        AnsiStyle::Blue => "34",
-        AnsiStyle::Cyan => "36",
-        AnsiStyle::CyanBold => "1;36",
-        AnsiStyle::DarkGray => "90",
-        AnsiStyle::Green => "32",
-        AnsiStyle::LightRed => "91",
-        AnsiStyle::Magenta => "35",
-        AnsiStyle::RedBold => "1;31",
-        AnsiStyle::Yellow => "33",
-        AnsiStyle::YellowBold => "1;33",
-    };
-    format!("\x1b[{code}m{value}\x1b[0m")
-}
-
-fn format_models(value: &serde_json::Value) -> String {
+fn format_models(value: &serde_json::Value, semantic_symbols: bool) -> String {
     let Some(items) = value.as_array() else {
         return format_generic(t("Models", "模型"), value);
     };
@@ -768,17 +904,31 @@ fn format_models(value: &serde_json::Value) -> String {
             string_field(item, "baseUrl"),
         ]);
     }
-    format_table(
-        &format!("{} ({})", t("Models", "模型"), rows.len()),
-        &[
-            t("AGENT", "AGENT"),
-            t("PROVIDER", "供应商"),
-            t("MODEL", "模型"),
-            t("ENABLED", "启用"),
-            t("PROTOCOL", "协议"),
-            t("BASE URL", "BASE URL"),
-        ],
-        rows,
+    format_list_view(
+        t("List models", "列出模型"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("model provider(s) discovered", "个模型供应商已发现")
+        ),
+        &format!(
+            "{} `sentra model set --agent sentra --base-url <url> --api-key <key> --model <id>`",
+            t("Next:", "下一步:")
+        ),
+        format_table(
+            &format!("{} ({})", t("Models", "模型"), rows.len()),
+            &[
+                t("AGENT", "AGENT"),
+                t("PROVIDER", "供应商"),
+                t("MODEL", "模型"),
+                t("ENABLED", "启用"),
+                t("PROTOCOL", "协议"),
+                t("BASE URL", "BASE URL"),
+            ],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
     )
 }
 
@@ -808,12 +958,17 @@ fn format_generic(title: &str, value: &serde_json::Value) -> String {
     output
 }
 
-fn format_table(title: &str, headers: &[&str], rows: Vec<Vec<String>>) -> String {
+fn format_table(title: &str, headers: &[&str], rows: Vec<Vec<String>>, color: bool) -> String {
     let mut output = String::new();
-    output.push_str(title);
+    output.push_str(&paint(title, AnsiStyle::Foreground, color));
     output.push('\n');
     if rows.is_empty() {
-        output.push_str(t("No records found\n", "没有记录\n"));
+        output.push_str(&paint(
+            t("No records found", "没有记录"),
+            AnsiStyle::Muted,
+            color,
+        ));
+        output.push('\n');
         return output;
     }
 
@@ -824,23 +979,44 @@ fn format_table(title: &str, headers: &[&str], rows: Vec<Vec<String>>) -> String
         }
     }
 
-    write_table_row(&mut output, headers, &widths);
+    write_table_row(&mut output, headers, &widths, Some(AnsiStyle::Muted), color);
     let separators: Vec<String> = widths.iter().map(|width| "-".repeat(*width)).collect();
     let separator_refs: Vec<&str> = separators.iter().map(String::as_str).collect();
-    write_table_row(&mut output, &separator_refs, &widths);
+    write_table_row(
+        &mut output,
+        &separator_refs,
+        &widths,
+        Some(AnsiStyle::Muted),
+        color,
+    );
     for row in rows {
         let cells: Vec<&str> = row.iter().map(String::as_str).collect();
-        write_table_row(&mut output, &cells, &widths);
+        write_table_row(
+            &mut output,
+            &cells,
+            &widths,
+            Some(AnsiStyle::Secondary),
+            color,
+        );
     }
     output
 }
 
-fn write_table_row(output: &mut String, cells: &[&str], widths: &[usize]) {
+fn write_table_row(
+    output: &mut String,
+    cells: &[&str],
+    widths: &[usize],
+    style: Option<AnsiStyle>,
+    color: bool,
+) {
     for (index, cell) in cells.iter().enumerate() {
         if index > 0 {
             output.push_str("  ");
         }
-        output.push_str(cell);
+        match style {
+            Some(style) => output.push_str(&paint(cell, style, color)),
+            None => output.push_str(cell),
+        }
         output.push_str(&" ".repeat(widths[index].saturating_sub(display_width(cell))));
     }
     output.push('\n');
@@ -862,6 +1038,14 @@ fn string_field(value: &serde_json::Value, key: &str) -> String {
     value
         .get(key)
         .and_then(|value| value.as_str())
+        .unwrap_or("-")
+        .to_string()
+}
+
+fn display_text_field(value: &serde_json::Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(|value| value.as_str()))
+        .filter(|value| !value.trim().is_empty())
         .unwrap_or("-")
         .to_string()
 }
@@ -952,7 +1136,7 @@ mod tests {
             }
         ]);
 
-        let output = format_assets(&value);
+        let output = format_assets(&value, false);
 
         assert!(output.contains("Skills (3)"));
         assert!(output.contains("AGENT"));
@@ -983,6 +1167,7 @@ mod tests {
                     "-".to_string(),
                 ],
             ],
+            false,
         );
 
         let rows = output.lines().skip(3).collect::<Vec<_>>();
@@ -992,6 +1177,74 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(description_columns[0], description_columns[1], "{output}");
+    }
+
+    #[test]
+    fn cron_terminal_output_uses_prompt_and_schedule_columns() {
+        let value = serde_json::json!([
+            {
+                "assetType": "cron",
+                "agentName": "claude-app",
+                "data": [
+                    {
+                        "name": "daily-news-update",
+                        "prompt": "每天早上8:30获取最新新闻",
+                        "enabled": true,
+                        "schedule": "30 8 * * *"
+                    }
+                ]
+            }
+        ]);
+
+        let output = format_assets(&value, false);
+
+        assert!(output.contains("List cron tasks"));
+        assert!(output.contains("1 cron task(s) discovered"));
+        assert!(output.contains("AGENT"));
+        assert!(output.contains("CRON"));
+        assert!(output.contains("ENABLED"));
+        assert!(output.contains("SCHEDULE"));
+        assert!(output.contains("PROMPT"));
+        assert!(output.contains("claude-app"));
+        assert!(output.contains("daily-news-update"));
+        assert!(output.contains("30 8 * * *"));
+        assert!(output.contains("每天早上8:30获取最新新闻"));
+        assert!(!output.contains("DESCRIPTION"));
+    }
+
+    #[test]
+    fn list_terminal_output_colors_text_hierarchy_when_enabled() {
+        let value = serde_json::json!([
+            {
+                "assetType": "cron",
+                "agentName": "claude-app",
+                "data": [
+                    {
+                        "name": "daily-news-update",
+                        "prompt": "每天早上8:30获取最新新闻",
+                        "enabled": true,
+                        "schedule": "30 8 * * *"
+                    }
+                ]
+            }
+        ]);
+
+        let output = format_assets(&value, true);
+
+        assert!(output.contains("\u{1b}[38;2;184;190;202mList cron tasks\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[38;2;100;109;122mAGENT\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[38;2;142;152;168mclaude-app\u{1b}[0m"));
+        assert!(!output.contains("\u{1b}[97m"));
+        assert!(!output.contains("\u{1b}[1;97m"));
+    }
+
+    #[test]
+    fn next_step_colon_is_part_of_muted_label() {
+        let output = format_next_step("Next: `sentra scan cron`", true);
+
+        assert!(output.starts_with("\u{1b}[38;2;100;109;122mNext:\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[38;2;142;152;168m `sentra scan cron`\u{1b}[0m"));
+        assert!(!output.contains("\u{1b}[0m:"));
     }
 
     fn display_column_of(line: &str, needle: &str) -> Option<usize> {
@@ -1093,7 +1346,9 @@ mod tests {
         );
         assert!(output.contains("  Context:"));
         assert!(output.contains("  > 544 | - Hidden input during long-running work."));
-        assert!(output.contains("Audit Summary  Risky assets:1/1 (risky/total)"));
+        assert!(output.contains("Audit complete"));
+        assert!(output.contains("  Risky assets: 1/1 (risky/total)"));
+        assert!(output.contains("Findings by asset"));
         assert!(output.contains("  Asset       Critical      High    Medium       Low      Info"));
         assert!(output.contains("  skill              ·         1         ·         ·         ·"));
     }
@@ -1117,8 +1372,10 @@ mod tests {
 
         assert!(!output.contains("clean-skill"));
         assert!(!output.contains("No risks found"));
-        assert!(output.contains("Audit Summary  Risky assets:0/1 (risky/total)"));
-        assert!(output.contains("  Asset       Critical      High    Medium       Low      Info"));
+        assert!(output.contains("Audit complete"));
+        assert!(output.contains("  Risky assets: 0/1 (risky/total)"));
+        assert!(output.contains("  Findings: none"));
+        assert!(!output.contains("  Asset       Critical      High    Medium       Low      Info"));
         assert!(!output.contains("  skill"));
     }
 
@@ -1221,12 +1478,12 @@ mod tests {
         ]);
 
         let colored = format_scan_results(&value, true);
-        assert!(colored.contains("\u{1b}[1;31mCritical\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[90m════════"));
-        assert!(colored.contains("\u{1b}[1;36mAudit Summary\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[1;31m1\u{1b}[0m/1 (risky/total)"));
-        assert!(colored.contains("\u{1b}[1;31mCritical\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[90m·\u{1b}[0m"));
+        assert!(colored.contains("\u{1b}[1;38;2;"));
+        assert!(colored.contains("\u{1b}[38;2;"));
+        assert!(colored.contains("mCritical\u{1b}[0m"));
+        assert!(colored.contains("mAudit complete\u{1b}[0m"));
+        assert!(colored.contains("m1\u{1b}[0m/1 (risky/total)"));
+        assert!(colored.contains("m·\u{1b}[0m"));
         assert!(!colored.contains("\u{1b}[97m"));
         assert!(!colored.contains("\u{1b}[1;97m"));
 
