@@ -4,7 +4,7 @@ use sentra_lib::agents::{Agent, discover_agents};
 use sentra_lib::interfaces::{AssetMutationResult, AssetType, SkillData};
 use sentra_lib::{SentraError, SentraResult};
 
-use crate::i18n::t;
+use crate::cli::i18n::t;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AgentSkillInventory {

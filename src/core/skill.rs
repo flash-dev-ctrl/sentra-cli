@@ -11,7 +11,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
@@ -23,13 +23,15 @@ use sentra_lib::{
 };
 use serde::Serialize;
 
-use crate::args::ScanChecker;
-use crate::i18n::t;
-use crate::output::print_json;
-use crate::scan_support::{
+use crate::cli::args::ScanChecker;
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::t;
+use crate::cli::output::print_json;
+use crate::core::scan_support::{
     RuleLoadOutput, build_scan_options, checker_selection, emit_scan_progress,
     finish_scan_progress, load_scanner_rules,
 };
+use crate::tui::theme;
 
 pub(crate) async fn add(
     source: String,
@@ -38,15 +40,40 @@ pub(crate) async fn add(
     force: bool,
 ) -> SentraResult<()> {
     let home = current_home()?;
-    eprintln!(
-        "{}: {source}",
-        t("fetching skill source", "正在获取技能来源")
+    feedback::context(
+        t("Install skills", "安装技能"),
+        &[
+            (t("Source", "来源"), source.clone()),
+            (
+                t("Mode", "模式"),
+                if force {
+                    t("force enabled", "强制安装").to_string()
+                } else {
+                    t("risk-gated", "风险拦截").to_string()
+                },
+            ),
+        ],
+    );
+    feedback::phase(
+        Status::Running,
+        format!("{}: {source}", t("Fetch skill source", "获取技能来源")),
     );
     let staged = stage_skill_source(&source)?;
-    eprintln!(
-        "{}: {}",
-        t("discovering skills from", "正在发现技能，来源"),
-        staged.path().display()
+    feedback::phase(
+        Status::Success,
+        format!(
+            "{}: {}",
+            t("Skill source staged", "技能来源已暂存"),
+            staged.path().display()
+        ),
+    );
+    feedback::phase(
+        Status::Running,
+        format!(
+            "{}: {}",
+            t("Discover skills from", "发现技能，来源"),
+            staged.path().display()
+        ),
     );
     let discovered = collect_skill_manifests_from_dir_async(staged.path()).await?;
     if discovered.is_empty() {
@@ -57,20 +84,28 @@ pub(crate) async fn add(
         )));
     }
     let total = discovered.len();
-    eprintln!(
-        "{} {total} {}",
-        t("discovered", "已发现"),
-        t("skill(s)", "个技能")
+    feedback::phase(
+        Status::Success,
+        format!(
+            "{} {total} {}",
+            t("Discovered", "已发现"),
+            t("skill(s)", "个技能")
+        ),
     );
 
     let checkers = checker_selection(&enabled_checkers);
     let mut skills = Vec::with_capacity(total);
     let interactive_progress = std::io::stderr().is_terminal();
     let mut scanner = RiskScanner::new(build_scan_options(&home, &checkers)?)?;
+    feedback::phase(
+        Status::Running,
+        t("Load risk rules before installation", "安装前加载风险规则"),
+    );
     load_scanner_rules(
         &mut scanner,
         RuleLoadOutput::for_terminal(interactive_progress),
     )?;
+    feedback::phase(Status::Success, t("Risk rules loaded", "风险规则已加载"));
     let mut progress_width = 0usize;
     for (index, skill) in discovered.into_iter().enumerate() {
         emit_scan_progress(
@@ -120,12 +155,12 @@ pub(crate) async fn add(
         (0..skills.len()).collect()
     };
     if selected_skill_indices.is_empty() {
-        eprintln!(
-            "{}",
+        feedback::phase(
+            Status::Warning,
             t(
                 "No skills selected; nothing installed.",
                 "未选择技能，未安装任何内容。",
-            )
+            ),
         );
         return Ok(());
     }
@@ -136,20 +171,29 @@ pub(crate) async fn add(
         agents
     };
     if target_agents.is_empty() {
-        eprintln!(
-            "{}",
+        feedback::status_line(
+            Status::Warning,
             t(
                 "No target agents selected; nothing installed.",
                 "未选择目标 Agent，未安装任何内容。",
-            )
+            ),
         );
         return Ok(());
     }
 
     let mut installed = Vec::new();
+    let total_copies = selected_skill_indices.len() * target_agents.len();
+    let mut current_copy = 0usize;
     for skill_index in selected_skill_indices {
         let skill = &mut skills[skill_index];
         for agent in &target_agents {
+            current_copy += 1;
+            feedback::counted_action(
+                current_copy,
+                total_copies,
+                t("Install skill copy", "安装技能副本"),
+                format!("{} -> {}", skill.data.name, agent.name()),
+            );
             let path = install_skill_to_agent(agent, &skill.data)?;
             installed.push(InstallRecord {
                 skill: skill.data.name.clone(),
@@ -159,11 +203,20 @@ pub(crate) async fn add(
         }
     }
 
+    feedback::result(
+        Status::Success,
+        format!(
+            "{} {}",
+            t("Installed skill copies", "已安装技能副本"),
+            installed.len()
+        ),
+        &[],
+    );
     print_install_summary(InstallSummary { installed })
 }
 
 pub(crate) async fn list() -> SentraResult<()> {
-    crate::skill_manager::run().await
+    crate::tui::skill_manager::run().await
 }
 
 fn is_risky(report: &sentra_lib::risks::ScanReport) -> bool {
@@ -601,7 +654,7 @@ fn render_header(
         Line::from(subtitle.dim()),
         Line::from(t("Type to search", "输入以搜索").dim()),
         Line::from(vec![
-            Span::styled(search_prefix, Style::default().fg(Color::DarkGray)),
+            Span::styled(search_prefix, theme::muted_style()),
             Span::raw(state.search.as_str()),
         ]),
     ];
@@ -634,11 +687,7 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, rows: &[SelectRow], state: &Se
         Block::default()
             .borders(Borders::ALL)
             .title(t("Items", "项目"))
-            .border_style(if state.focus_pane == FocusPane::List {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default()
-            }),
+            .border_style(theme::border_style(state.focus_pane == FocusPane::List)),
     );
     frame.render_widget(list, area);
 }
@@ -683,7 +732,7 @@ fn list_item<'a>(index: usize, rows: &'a [SelectRow], state: &SelectorState) -> 
     let title_style = if has_risk {
         risk_row_style(row)
     } else if row.disabled {
-        Style::default().fg(Color::DarkGray)
+        theme::muted_style()
     } else {
         Style::default()
     };
@@ -701,30 +750,26 @@ fn list_item<'a>(index: usize, rows: &'a [SelectRow], state: &SelectorState) -> 
             line = line.dim();
         }
     } else if row.disabled {
-        line = line.patch_style(Style::default().fg(Color::DarkGray));
+        line = line.patch_style(theme::muted_style());
     }
     ListItem::new(line)
 }
 
 fn focus_pointer_style(index: usize, state: &SelectorState) -> Style {
     if index == state.focus {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+        theme::focus_style()
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme::muted_style()
     }
 }
 
 fn marker_style(index: usize, state: &SelectorState, has_risk: bool) -> Style {
     if has_risk {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        theme::warning_style().add_modifier(Modifier::BOLD)
     } else if state.selected.contains(&index) {
-        Style::default().fg(Color::Green)
+        theme::success_style()
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme::muted_style()
     }
 }
 
@@ -755,11 +800,7 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, rows: &[SelectRow], state: &
             Block::default()
                 .borders(Borders::ALL)
                 .title("Details")
-                .border_style(if state.focus_pane == FocusPane::Details {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default()
-                }),
+                .border_style(theme::border_style(state.focus_pane == FocusPane::Details)),
         )
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
@@ -879,10 +920,7 @@ fn detail_lines_for_width(
     if row.risk_findings.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(t("Risk", "风险")).bold());
-        lines.push(
-            Line::from(t("No risk findings", "无风险发现"))
-                .style(Style::default().fg(Color::Green)),
-        );
+        lines.push(Line::from(t("No risk findings", "无风险发现")).style(theme::success_style()));
         return lines;
     }
 
@@ -893,11 +931,7 @@ fn detail_lines_for_width(
             t("Risks", "风险"),
             row.risk_findings.len()
         ))
-        .style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
+        .style(theme::warning_style().add_modifier(Modifier::BOLD)),
     );
     let total = row.risk_findings.len();
     for (index, finding) in row.risk_findings.iter().enumerate() {
@@ -911,25 +945,18 @@ fn detail_lines_for_width(
 
 fn labeled_line(label: &str, value: String, value_style: Style) -> Line<'static> {
     Line::from(vec![
-        Span::styled(
-            format!("{label:<12}: "),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("{label:<12}: "), theme::muted_style()),
         Span::styled(value, value_style),
     ])
 }
 
 fn status_style(row: &SelectRow, state: &SelectorState) -> Style {
     if row.disabled {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        theme::warning_style().add_modifier(Modifier::BOLD)
     } else if state.selected.contains(&state.focus) {
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD)
+        theme::success_style().add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme::muted_style()
     }
 }
 
@@ -941,12 +968,7 @@ fn risk_finding_lines(
 ) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(vec![
-            Span::styled(
-                format!("# {index}/{total}"),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(format!("# {index}/{total}"), theme::focus_style()),
             Span::raw("  "),
             Span::styled(
                 finding.title.clone(),
@@ -966,7 +988,7 @@ fn risk_finding_lines(
         detail_field_line(
             t("Category", "类别"),
             category_label(finding.category).to_string(),
-            Style::default().fg(Color::Magenta),
+            theme::info_style(),
         ),
         detail_field_line(
             t("Checker", "检查器"),
@@ -997,7 +1019,7 @@ fn risk_finding_lines(
         lines.extend(multiline_detail_lines(
             t("Evidence", "证据"),
             evidence,
-            Style::default().fg(Color::Yellow),
+            theme::warning_style(),
             layout,
         ));
     }
@@ -1021,7 +1043,7 @@ fn risk_finding_lines(
 
 fn detail_field_line(label: &str, value: String, value_style: Style) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label}: "), Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("{label}: "), theme::muted_style()),
         Span::styled(value, value_style),
     ])
 }
@@ -1039,14 +1061,14 @@ fn multiline_detail_lines(
     if wrapped.is_empty() {
         return vec![Line::from(Span::styled(
             format!("{label}:"),
-            Style::default().fg(Color::DarkGray),
+            theme::muted_style(),
         ))];
     }
     let mut lines = Vec::with_capacity(wrapped.len());
     for (index, line) in wrapped.into_iter().enumerate() {
         if index == 0 {
             lines.push(Line::from(vec![
-                Span::styled(prefix.clone(), Style::default().fg(Color::DarkGray)),
+                Span::styled(prefix.clone(), theme::muted_style()),
                 Span::styled(line, value_style),
             ]));
         } else {
@@ -1059,7 +1081,7 @@ fn multiline_detail_lines(
 fn detail_section_label(label: &str) -> Line<'static> {
     Line::from(vec![Span::styled(
         format!("{label}:"),
-        Style::default().fg(Color::DarkGray),
+        theme::muted_style(),
     )])
 }
 
@@ -1143,11 +1165,9 @@ fn context_lines(
         .saturating_sub(number_width.saturating_sub(MIN_CONTEXT_LINE_NUMBER_WIDTH))
         .max(1);
     let style = if context.is_target {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        theme::warning_style().add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme::muted_style()
     };
     let wrapped = wrap_text(&context.text, context_text_width);
     if wrapped.is_empty() {
@@ -1190,14 +1210,7 @@ fn context_gutter(marker: char, number: Option<usize>, number_width: usize) -> S
 }
 
 fn severity_style(severity: RiskSeverity) -> Style {
-    let color = match severity {
-        RiskSeverity::Critical => Color::Red,
-        RiskSeverity::High => Color::LightRed,
-        RiskSeverity::Medium => Color::Yellow,
-        RiskSeverity::Low => Color::Blue,
-        RiskSeverity::Info => Color::Cyan,
-    };
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
+    theme::severity_style(severity)
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &SelectorState) {
@@ -1499,6 +1512,23 @@ impl SelectorState {
                 modifiers: KeyModifiers::NONE,
                 ..
             } if !self.search_mode && self.focus_pane == FocusPane::List => self.toggle_all(rows),
+            KeyEvent {
+                code: KeyCode::Char('a'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } if !self.search_mode && self.focus_pane == FocusPane::List => {
+                self.toggle_visible(rows)
+            }
+            KeyEvent {
+                code: KeyCode::Char('r'),
+                modifiers,
+                ..
+            } if !self.search_mode
+                && self.focus_pane == FocusPane::List
+                && (modifiers.is_empty() || modifiers == KeyModifiers::CONTROL) =>
+            {
+                self.invert_visible(rows)
+            }
             _ => {}
         }
         SelectorAction::None
@@ -1639,6 +1669,45 @@ impl SelectorState {
             self.selected = selectable;
             self.status = None;
         }
+    }
+
+    fn toggle_visible(&mut self, rows: &[SelectRow]) {
+        let selectable = self
+            .visible_indices(rows)
+            .into_iter()
+            .filter(|index| rows.get(*index).is_some_and(|row| !row.disabled))
+            .collect::<Vec<_>>();
+        if selectable.is_empty() {
+            self.status = Some("No selectable visible items.".to_string());
+            return;
+        }
+        let all_selected = selectable.iter().all(|index| self.selected.contains(index));
+        if all_selected {
+            for index in selectable {
+                self.selected.remove(&index);
+            }
+        } else {
+            self.selected.extend(selectable);
+        }
+        self.status = None;
+    }
+
+    fn invert_visible(&mut self, rows: &[SelectRow]) {
+        let selectable = self
+            .visible_indices(rows)
+            .into_iter()
+            .filter(|index| rows.get(*index).is_some_and(|row| !row.disabled))
+            .collect::<Vec<_>>();
+        if selectable.is_empty() {
+            self.status = Some("No selectable visible items.".to_string());
+            return;
+        }
+        for index in selectable {
+            if !self.selected.remove(&index) {
+                self.selected.insert(index);
+            }
+        }
+        self.status = None;
     }
 }
 
@@ -1805,6 +1874,41 @@ mod tests {
     }
 
     #[test]
+    fn selector_ctrl_a_toggles_visible_enabled_rows() {
+        let rows = rows();
+        let mut state = SelectorState::new(&rows);
+        state.search = "safe".to_string();
+
+        state.handle_key(
+            &rows,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        );
+
+        assert_eq!(state.selected, BTreeSet::from([0, 2]));
+        assert!(!state.selected.contains(&1));
+
+        state.handle_key(
+            &rows,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        );
+
+        assert!(state.selected.is_empty());
+    }
+
+    #[test]
+    fn selector_r_inverts_visible_enabled_rows() {
+        let rows = rows();
+        let mut state = SelectorState::new(&rows);
+        state.selected.insert(0);
+        state.search = "safe".to_string();
+
+        state.handle_key(&rows, KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+        assert_eq!(state.selected, BTreeSet::from([2]));
+        assert!(!state.selected.contains(&1));
+    }
+
+    #[test]
     fn selector_detail_focus_scrolls_without_toggling_list_items() {
         let mut rows = rows();
         rows[0].details = (0..40).map(|index| format!("line: {index}")).collect();
@@ -1844,20 +1948,20 @@ mod tests {
     #[test]
     fn scan_progress_message_includes_current_total_and_percent() {
         assert_eq!(
-            crate::scan_support::scan_progress_message("skill", 2, 5, "demo"),
-            "scanning skill 2/5 (40%): demo"
+            crate::core::scan_support::scan_progress_message("skill", 2, 5, "demo"),
+            "Scan skill 2/5 (40%): demo"
         );
     }
 
     #[test]
     fn rule_load_progress_message_includes_stage_and_percent() {
         assert_eq!(
-            crate::scan_support::rule_load_progress_message(
+            crate::core::scan_support::rule_load_progress_message(
                 2,
                 3,
                 sentra_lib::risks::RuleType::ThreatIntel,
             ),
-            "Loading risk rules 2/3 (67%): loading threat intel rules"
+            "Load risk rules 2/3 (67%): Load threat intel rules"
         );
     }
 

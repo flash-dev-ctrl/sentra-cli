@@ -13,7 +13,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
@@ -21,20 +21,21 @@ use sentra_lib::interfaces::RiskSeverity;
 use sentra_lib::risks::{RiskAsset, RiskScanner, ScanReport};
 use sentra_lib::{SentraError, SentraResult};
 
-use crate::args::ScanChecker;
-use crate::i18n::t;
-use crate::scan_support::{
+use crate::cli::args::ScanChecker;
+use crate::cli::i18n::t;
+use crate::core::scan_support::{
     RuleLoadOutput, build_scan_options_with_cache, checker_selection, load_scanner_rules,
 };
-use crate::skill_inventory::{
+use crate::core::skill_inventory::{
     AgentSkillInventory, SkillInventoryRow, collect_skill_inventories, delete_skill_from_agent,
     grouped_skill_rows, install_skill_to_agent,
 };
+use crate::tui::theme;
 
 const DEFAULT_FOOTER: &str =
-    "Tab focus  / search  Space select  a group  s scan  i install  d delete  ? help";
-const HELP_FOOTER_PRIMARY: &str = "Tab focus  Space one  a group all/none  s scan  Ctrl+S rescan";
-const HELP_FOOTER_SECONDARY: &str = "i install  d delete  / search  q/Esc quit";
+    "Tab focus  / search  Space one  a group  Ctrl+A all  r invert  s scan";
+const HELP_FOOTER_PRIMARY: &str = "Space one  a group  Ctrl+A all  r invert  s scan  Ctrl+S rescan";
+const HELP_FOOTER_SECONDARY: &str = "i install  d delete  Tab focus  / search  q/Esc quit";
 const MUTATION_SPINNER_TICK: Duration = Duration::from_millis(120);
 
 pub(crate) async fn run() -> SentraResult<()> {
@@ -426,12 +427,7 @@ impl SkillManagerApp {
             for (index, finding) in report.findings.iter().enumerate() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("# {}/{}", index + 1, total),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(format!("# {}/{}", index + 1, total), theme::focus_style()),
                     Span::raw("  "),
                     Span::styled(
                         finding.title.clone(),
@@ -575,6 +571,22 @@ impl SkillManagerApp {
                 ..
             } => {
                 self.toggle_current_skill_group_selection();
+                Ok(AppAction::Continue)
+            }
+            KeyEvent {
+                code: KeyCode::Char('a'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                self.toggle_visible_skill_selection();
+                Ok(AppAction::Continue)
+            }
+            KeyEvent {
+                code: KeyCode::Char('r'),
+                modifiers,
+                ..
+            } if modifiers.is_empty() || modifiers == KeyModifiers::CONTROL => {
+                self.invert_visible_skill_selection();
                 Ok(AppAction::Continue)
             }
             KeyEvent {
@@ -743,6 +755,67 @@ impl SkillManagerApp {
             group.len(),
             t("skill(s).", "个技能。")
         );
+    }
+
+    fn toggle_visible_skill_selection(&mut self) {
+        if self.focus != FocusPane::Skills {
+            return;
+        }
+        let rows = self.current_rows();
+        let visible = self.visible_skill_indices(&rows);
+        if visible.is_empty() {
+            self.status = t("No skills available to select.", "没有可选择的技能。").to_string();
+            return;
+        }
+        let all_selected = visible.iter().all(|index| self.selected.contains(index));
+        if all_selected {
+            for index in &visible {
+                self.selected.remove(index);
+            }
+        } else {
+            for index in &visible {
+                self.selected.insert(*index);
+            }
+        }
+        let action = if all_selected {
+            t("Cleared", "已清空")
+        } else {
+            t("Selected", "已选择")
+        };
+        self.status = format!(
+            "{action} {} {}",
+            visible.len(),
+            t("visible skill(s).", "个可见技能。")
+        );
+    }
+
+    fn invert_visible_skill_selection(&mut self) {
+        if self.focus != FocusPane::Skills {
+            return;
+        }
+        let rows = self.current_rows();
+        let visible = self.visible_skill_indices(&rows);
+        if visible.is_empty() {
+            self.status = t("No skills available to select.", "没有可选择的技能。").to_string();
+            return;
+        }
+        let mut selected_count = 0usize;
+        for index in &visible {
+            if !self.selected.remove(index) {
+                self.selected.insert(*index);
+                selected_count += 1;
+            }
+        }
+        self.status = format!(
+            "{} {} {}",
+            t("Inverted", "已反选"),
+            visible.len(),
+            t("visible skill(s).", "个可见技能。")
+        );
+        if selected_count == 0 {
+            self.status
+                .push_str(&format!(" {}", t("None selected.", "当前未选择。")));
+        }
     }
 
     async fn scan_selected(&mut self, no_cache: bool) -> SentraResult<()> {
@@ -1024,30 +1097,24 @@ fn skill_list_entries(rows: &[SkillInventoryRow], visible: &[usize]) -> Vec<Skil
 }
 
 fn body_style() -> Style {
-    Style::default().fg(Color::Gray)
+    theme::body_style()
 }
 
 fn muted_style() -> Style {
-    Style::default().fg(Color::DarkGray)
+    theme::muted_style()
 }
 
 fn title_style() -> Style {
-    Style::default()
-        .fg(Color::Gray)
-        .add_modifier(Modifier::BOLD)
+    theme::title_style()
 }
 
 fn focus_style() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
+    theme::focus_style()
 }
 
 fn focus_pointer_style(focused: bool) -> Style {
     if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+        theme::focus_style()
     } else {
         muted_style()
     }
@@ -1057,7 +1124,7 @@ fn marker_style(selected: bool, has_findings: bool) -> Style {
     if has_findings {
         finding_count_style()
     } else if selected {
-        Style::default().fg(Color::Green)
+        theme::success_style()
     } else {
         muted_style()
     }
@@ -1074,9 +1141,7 @@ fn skill_name_style(row: &SkillInventoryRow, has_findings: bool) -> Style {
 }
 
 fn finding_count_style() -> Style {
-    Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD)
+    theme::warning_style().add_modifier(Modifier::BOLD)
 }
 
 fn finding_count_label(count: usize) -> String {
@@ -1088,26 +1153,14 @@ fn finding_count_label(count: usize) -> String {
 }
 
 fn severity_style(severity: RiskSeverity) -> Style {
-    match severity {
-        RiskSeverity::Critical => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        RiskSeverity::High => Style::default()
-            .fg(Color::LightRed)
-            .add_modifier(Modifier::BOLD),
-        RiskSeverity::Medium => Style::default().fg(Color::Yellow),
-        RiskSeverity::Low => Style::default().fg(Color::Blue),
-        RiskSeverity::Info => Style::default().fg(Color::Cyan),
-    }
+    theme::severity_style(severity)
 }
 
 fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .title(Line::from(title).style(title_style()))
-        .border_style(if focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            muted_style()
-        })
+        .border_style(theme::border_style(focused))
 }
 
 fn labeled(label: &str, value: &str) -> Line<'static> {
@@ -1431,7 +1484,7 @@ mod tests {
     fn skill_manager_loads_scan_rules_without_terminal_output() {
         assert_eq!(
             skill_manager_rule_load_output(),
-            crate::scan_support::RuleLoadOutput::Silent
+            crate::core::scan_support::RuleLoadOutput::Silent
         );
     }
 
@@ -1540,13 +1593,64 @@ mod tests {
     }
 
     #[test]
+    fn skill_manager_ctrl_a_toggles_all_visible_skills() {
+        let mut app = app_with_many_installed_and_available();
+        app.skill_search = "available".to_string();
+        let mut redraw = |_app: &mut SkillManagerApp| Ok(());
+
+        block_on(app.handle_key(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            &mut redraw,
+        ))
+        .unwrap();
+
+        assert_eq!(app.selected.len(), 20);
+        assert!(app.selected.iter().all(|index| *index >= 60));
+        assert_eq!(app.status, "Selected 20 visible skill(s).");
+
+        block_on(app.handle_key(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            &mut redraw,
+        ))
+        .unwrap();
+
+        assert!(app.selected.is_empty());
+        assert_eq!(app.status, "Cleared 20 visible skill(s).");
+    }
+
+    #[test]
+    fn skill_manager_r_inverts_visible_skill_selection() {
+        let mut app = app_with_many_installed_and_available();
+        app.skill_search = "available".to_string();
+        app.selected.insert(60);
+        let mut redraw = |_app: &mut SkillManagerApp| Ok(());
+
+        block_on(app.handle_key(
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+            &mut redraw,
+        ))
+        .unwrap();
+
+        assert_eq!(app.selected.len(), 19);
+        assert!(!app.selected.contains(&60));
+        assert!(app.selected.iter().all(|index| *index > 60));
+        assert_eq!(app.status, "Inverted 20 visible skill(s).");
+    }
+
+    #[test]
     fn skill_manager_palette_avoids_harsh_white_for_primary_text() {
-        assert_eq!(body_style().fg, Some(Color::Gray));
-        assert_eq!(title_style().fg, Some(Color::Gray));
-        assert_eq!(muted_style().fg, Some(Color::DarkGray));
-        assert_eq!(focus_style().fg, Some(Color::Cyan));
-        assert_ne!(body_style().fg, Some(Color::White));
-        assert_ne!(title_style().fg, Some(Color::White));
+        let body = body_style().fg.expect("body color");
+        let title = title_style().fg.expect("title color");
+        let muted = muted_style().fg.expect("muted color");
+        let focus = focus_style().fg.expect("focus color");
+
+        assert!(matches!(body, ratatui::style::Color::Rgb(_, _, _)));
+        assert!(matches!(title, ratatui::style::Color::Rgb(_, _, _)));
+        assert!(matches!(muted, ratatui::style::Color::Rgb(_, _, _)));
+        assert!(matches!(focus, ratatui::style::Color::Rgb(_, _, _)));
+        assert_ne!(body, ratatui::style::Color::White);
+        assert_ne!(title, ratatui::style::Color::White);
+        assert_ne!(focus, muted);
     }
 
     #[test]

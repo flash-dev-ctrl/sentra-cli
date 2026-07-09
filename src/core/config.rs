@@ -5,9 +5,12 @@ use sentra_lib::config::{
 };
 use sentra_lib::{SentraError, SentraResult};
 
-use crate::args::{ConfigAction, RuleAction};
-use crate::i18n::t;
-use crate::import;
+use crate::cli::args::{ConfigAction, RuleAction};
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::t;
+use crate::cli::output::{self, stdout_color_enabled};
+use crate::core::import;
+use crate::tui::theme::{AnsiStyle, paint};
 
 const DEFAULT_CONFIG: &str = "{\n}\n";
 
@@ -184,32 +187,27 @@ Examples:
 fn get(home: &Path) -> SentraResult<()> {
     let config = load_json_config(home)?;
 
-    println!();
-    println!("=== {} ===", t("LLM", "大模型"));
+    print_page_header(
+        t("View configuration", "查看配置"),
+        &[(
+            t("Config", "配置"),
+            sentra_config_file(home).display().to_string(),
+        )],
+    );
+    print_section(t("LLM", "大模型"));
     print_llm_config(&config);
 
-    println!();
-    println!("=== {} ===", t("Intel", "情报"));
+    print_section(t("Intel", "情报"));
     print_intel_config(&config);
 
-    println!();
-    println!("=== {} ===", t("YARA Rules", "YARA 规则"));
+    print_section(t("YARA Rules", "YARA 规则"));
     print_rule_dir(&sentra_yara_rule_dir(home), &["yar", "yara"]);
 
-    println!();
-    println!("=== {} ===", t("Threat Intelligence", "威胁情报"));
+    print_section(t("Threat Intelligence", "威胁情报"));
     print_rule_dir(&sentra_ti_rule_dir(home), &["txt", "csv"]);
 
-    println!();
-    println!("=== {} ===", t("File Hash Lists", "文件哈希列表"));
+    print_section(t("File Hash Lists", "文件哈希列表"));
     print_rule_dir(&sentra_hash_rule_dir(home), &["txt", "csv", "json"]);
-
-    println!();
-    println!(
-        "{}: {}",
-        t("Config", "配置"),
-        sentra_config_file(home).display()
-    );
     Ok(())
 }
 
@@ -239,7 +237,14 @@ fn set(home: &Path, key: &str, value: &str) -> SentraResult<()> {
     } else {
         value.to_string()
     };
-    println!("{key} = {display}");
+    feedback::result(
+        Status::Success,
+        t("Configuration updated", "配置已更新"),
+        &[
+            (t("Key", "键"), key.to_string()),
+            (t("Value", "值"), display),
+        ],
+    );
     Ok(())
 }
 
@@ -264,7 +269,11 @@ fn del(home: &Path, key: &str, _value: Option<&str>) -> SentraResult<()> {
         )));
     }
     save_json_config(home, &config)?;
-    println!("{key} {}", t("unset", "已取消设置"));
+    feedback::result(
+        Status::Success,
+        t("Configuration unset", "配置已取消设置"),
+        &[(t("Key", "键"), key.to_string())],
+    );
     Ok(())
 }
 
@@ -300,17 +309,17 @@ fn save_json_config(home: &Path, config: &serde_json::Value) -> SentraResult<()>
 
 fn print_llm_config(config: &serde_json::Value) {
     let Some(llm) = config.get("llm").and_then(|value| value.as_object()) else {
-        println!("  {}", t("(no configuration)", "(无配置)"));
+        print_empty(t("(no configuration)", "(无配置)"));
         return;
     };
     if llm.is_empty() {
-        println!("  {}", t("(no configuration)", "(无配置)"));
+        print_empty(t("(no configuration)", "(无配置)"));
         return;
     }
-    print_optional_value(llm, "api", "  llm.api   = ", false);
-    print_optional_value(llm, "key", "  llm.key   = ", true);
-    print_optional_value(llm, "model", "  llm.model = ", false);
-    print_optional_value(llm, "protocol", "  llm.protocol = ", false);
+    print_optional_value(llm, "api", "llm.api", false);
+    print_optional_value(llm, "key", "llm.key", true);
+    print_optional_value(llm, "model", "llm.model", false);
+    print_optional_value(llm, "protocol", "llm.protocol", false);
 }
 
 fn print_intel_config(config: &serde_json::Value) {
@@ -342,20 +351,20 @@ fn print_intel_config(config: &serde_json::Value) {
         }
     }
     if rows.is_empty() {
-        println!("  {}", t("(no configuration)", "(无配置)"));
+        print_empty(t("(no configuration)", "(无配置)"));
         return;
     }
     rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
     for (key, value, secret) in rows {
         let display = if secret { mask_secret(&value) } else { value };
-        println!("  {key} = {display}");
+        print_key_value(&key, &display);
     }
 }
 
 fn print_optional_value(
     object: &serde_json::Map<String, serde_json::Value>,
     key: &str,
-    prefix: &str,
+    label: &str,
     secret: bool,
 ) {
     if let Some(value) = object.get(key).and_then(|value| value.as_str()) {
@@ -364,36 +373,61 @@ fn print_optional_value(
         } else {
             value.to_string()
         };
-        println!("{prefix}{display}");
+        print_key_value(label, &display);
     }
 }
 
 fn get_rules(home: &Path) -> SentraResult<()> {
     let config = load_json_config(home)?;
 
-    println!();
-    println!("=== {} ===", t("Rule Sources", "规则来源"));
+    print_page_header(
+        t("View rule sources", "查看规则来源"),
+        &[(
+            t("Config", "配置"),
+            sentra_config_file(home).display().to_string(),
+        )],
+    );
+    print_section(t("Rule Sources", "规则来源"));
     print_rule_sources(&config);
 
-    println!();
-    println!("=== {} ===", t("YARA Rules", "YARA 规则"));
+    print_section(t("YARA Rules", "YARA 规则"));
     print_rule_dir(&sentra_yara_rule_dir(home), &["yar", "yara"]);
 
-    println!();
-    println!("=== {} ===", t("Threat Intelligence", "威胁情报"));
+    print_section(t("Threat Intelligence", "威胁情报"));
     print_rule_dir(&sentra_ti_rule_dir(home), &["txt", "csv"]);
 
-    println!();
-    println!("=== {} ===", t("File Hash Lists", "文件哈希列表"));
+    print_section(t("File Hash Lists", "文件哈希列表"));
     print_rule_dir(&sentra_hash_rule_dir(home), &["txt", "csv", "json"]);
-
-    println!();
-    println!(
-        "{}: {}",
-        t("Config", "配置"),
-        sentra_config_file(home).display()
-    );
     Ok(())
+}
+
+fn print_page_header(title: &str, fields: &[(&str, String)]) {
+    let color = stdout_color_enabled();
+    let mut output = String::new();
+    output.push_str(&paint(
+        if color { "●" } else { "[INFO]" },
+        AnsiStyle::Purple,
+        color,
+    ));
+    output.push(' ');
+    output.push_str(&paint(title, AnsiStyle::Foreground, color));
+    output.push('\n');
+    for (label, value) in fields {
+        output.push_str("  ");
+        output.push_str(&paint(&format!("{label}:"), AnsiStyle::Muted, color));
+        output.push(' ');
+        output.push_str(&paint(value, AnsiStyle::Secondary, color));
+        output.push('\n');
+    }
+    let _ = output::write_stdout(&output);
+}
+
+fn print_section(title: &str) {
+    let color = stdout_color_enabled();
+    let _ = output::write_stdout(&format!(
+        "\n{}\n",
+        paint(title, AnsiStyle::Foreground, color)
+    ));
 }
 
 fn set_rule_source(home: &Path, key: &str, value: &str) -> SentraResult<()> {
@@ -407,7 +441,14 @@ fn set_rule_source(home: &Path, key: &str, value: &str) -> SentraResult<()> {
     let mut config = load_json_config(home)?;
     append_rule_source(&mut config, key, value);
     save_json_config(home, &config)?;
-    println!("{key} = {value}");
+    feedback::result(
+        Status::Success,
+        t("Rule source updated", "规则来源已更新"),
+        &[
+            (t("Key", "键"), key.to_string()),
+            (t("Source", "来源"), value.to_string()),
+        ],
+    );
     Ok(())
 }
 
@@ -422,7 +463,11 @@ fn del_rule_source(home: &Path, key: &str, value: Option<&str>) -> SentraResult<
     let mut config = load_json_config(home)?;
     delete_rule_source(&mut config, key, value);
     save_json_config(home, &config)?;
-    println!("{key} {}", t("unset", "已取消设置"));
+    feedback::result(
+        Status::Success,
+        t("Rule source unset", "规则来源已取消设置"),
+        &[(t("Key", "键"), key.to_string())],
+    );
     Ok(())
 }
 
@@ -438,24 +483,53 @@ fn print_rule_sources(config: &serde_json::Value) {
         }
     }
     if rows.is_empty() {
-        println!("  {}", t("(no configuration)", "(无配置)"));
+        print_empty(t("(no configuration)", "(无配置)"));
         return;
     }
     rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
     for (key, value) in rows {
-        println!("  rule.{key} = {value}");
+        print_key_value(&format!("rule.{key}"), &value);
     }
 }
 
 fn print_rule_dir(dir: &std::path::Path, extensions: &[&str]) {
     let files = list_rule_files(dir, extensions);
     if files.is_empty() {
-        println!("  {}", t("(none)", "(无)"));
+        print_empty(t("(none)", "(无)"));
         return;
     }
+    let color = stdout_color_enabled();
+    let mut output = String::new();
     for (name, size) in files {
-        println!("  {name} ({:.1} KB)", size as f64 / 1024.0);
+        output.push_str("  ");
+        output.push_str(&paint(&name, AnsiStyle::Secondary, color));
+        output.push(' ');
+        output.push_str(&paint(
+            &format!("({:.1} KB)", size as f64 / 1024.0),
+            AnsiStyle::Muted,
+            color,
+        ));
+        output.push('\n');
     }
+    let _ = output::write_stdout(&output);
+}
+
+fn print_empty(value: &str) {
+    let color = stdout_color_enabled();
+    let _ = output::write_stdout(&format!("  {}\n", paint(value, AnsiStyle::Muted, color)));
+}
+
+fn print_key_value(key: &str, value: &str) {
+    let color = stdout_color_enabled();
+    let mut output = String::new();
+    output.push_str("  ");
+    output.push_str(&paint(key, AnsiStyle::Muted, color));
+    output.push(' ');
+    output.push_str(&paint("=", AnsiStyle::Muted, color));
+    output.push(' ');
+    output.push_str(&paint(value, AnsiStyle::Secondary, color));
+    output.push('\n');
+    let _ = output::write_stdout(&output);
 }
 
 fn list_rule_files(dir: &std::path::Path, extensions: &[&str]) -> Vec<(String, u64)> {

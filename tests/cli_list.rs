@@ -548,9 +548,14 @@ fn sentra_model_set_writes_sentra_provider_config() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Updated sentra model provider"));
-    assert!(!stdout.contains("sk-test-secret"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Model provider updated"));
+    assert!(stderr.contains("Agent"));
+    assert!(stderr.contains("sentra"));
+    assert!(stderr.contains("Base URL: https://api.example.test/v1"));
+    assert!(stderr.contains("Model"));
+    assert!(stderr.contains("gpt-test"));
+    assert!(!stderr.contains("sk-test-secret"));
 
     let content = fs::read_to_string(dir.path().join(".sentra").join("config.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -590,8 +595,11 @@ fn sentra_model_delete_removes_sentra_provider_config() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Deleted sentra model provider"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Model provider deleted"));
+    assert!(stderr.contains("Agent"));
+    assert!(stderr.contains("sentra"));
+    assert!(stderr.contains("Base URL: https://api.example.test/v1"));
 
     let content = fs::read_to_string(sentra_home.join("config.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -618,9 +626,10 @@ fn sentra_scan_terminal_output_shows_target_and_finding_counts() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("skill \"codex-demo\""));
     assert!(!stdout.contains("No risks found"));
-    assert!(stdout.contains("Audit Summary  Risky assets:0/1 (risky/total)"));
-    assert!(stdout.contains("Asset"));
-    assert!(stdout.contains("Critical"));
+    assert!(stdout.contains("Audit complete"));
+    assert!(stdout.contains("Risky assets: 0/1 (risky/total)"));
+    assert!(stdout.contains("Findings: none"));
+    assert!(!stdout.contains("Findings by asset"));
     assert!(!stdout.contains("Scan Results (1)"));
     assert!(serde_json::from_slice::<serde_json::Value>(&output.stdout).is_err());
 }
@@ -1160,8 +1169,12 @@ rule ImportMarker {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Imported rules: yara=1 ti=1 hash=1 skipped=0"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Rule import complete"));
+    assert!(stderr.contains("YARA"));
+    assert!(stderr.contains("Threat intelligence"));
+    assert!(stderr.contains("Hash lists"));
+    assert!(stderr.contains("Skipped"));
     assert!(
         dir.path()
             .join(".sentra")
@@ -1199,7 +1212,10 @@ fn sentra_import_returns_nonzero_when_a_file_is_skipped() {
         .unwrap();
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("skipped=1"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Rule import complete"));
+    assert!(stderr.contains("Skipped"));
+    assert!(stderr.contains(": 1"));
 }
 
 #[test]
@@ -1250,10 +1266,12 @@ rule ConfigImportMarker {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("Imported rules: yara=1 ti=1 hash=0 skipped=0")
-    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Rule update complete"));
+    assert!(stderr.contains("YARA"));
+    assert!(stderr.contains("Threat intelligence"));
+    assert!(stderr.contains("Hash lists"));
+    assert!(stderr.contains("Skipped"));
     assert!(
         dir.path()
             .join(".sentra")
@@ -1325,10 +1343,11 @@ fn sentra_config_get_masks_intel_keys_and_lists_rule_files() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("=== Intel ==="));
+    assert!(stdout.contains("[INFO] View configuration"));
+    assert!(stdout.contains("Intel"));
     assert!(stdout.contains("intel.chaitin_key = chai****3456"));
     assert!(stdout.contains("intel.threatbook_key = thre****cdef"));
-    assert!(stdout.contains("=== File Hash Lists ==="));
+    assert!(stdout.contains("File Hash Lists"));
     assert!(stdout.contains("white.sha256.txt"));
     assert!(stdout.contains("Config:"));
     assert!(!stdout.contains("chaitin-secret-123456"));
@@ -1443,8 +1462,8 @@ fn sentra_skill_add_installs_safe_path_skill_to_agent() {
             .is_file()
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("discovered 1 skill(s)"));
-    assert!(stderr.contains("scanning skill 1/1 (100%)"));
+    assert!(stderr.contains("Discovered 1 skill(s)"));
+    assert!(stderr.contains("Scan skill 1/1 (100%)"));
 }
 
 #[test]

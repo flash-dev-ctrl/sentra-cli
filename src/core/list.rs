@@ -5,9 +5,9 @@ use sentra_lib::{SentraError, SentraResult, agents::discover_agents};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::args::{ListResource, OutputOptions};
-use crate::i18n::t;
-use crate::output::write_output;
+use crate::cli::args::{ListResource, OutputOptions};
+use crate::cli::i18n::t;
+use crate::cli::output::write_output;
 
 pub(crate) async fn run(
     resource: ListResource,

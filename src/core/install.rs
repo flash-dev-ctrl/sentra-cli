@@ -1,28 +1,52 @@
-use sentra_lib::interfaces::{
-    AgentInstallAction, AgentInstallProgress, AgentInstallProgressStage, AgentInstallResult,
-};
+#[cfg(test)]
+use sentra_lib::interfaces::AgentInstallResult;
+use sentra_lib::interfaces::{AgentInstallAction, AgentInstallProgress, AgentInstallProgressStage};
 use sentra_lib::{SentraResult, agents};
 
-use crate::i18n::t;
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::t;
 
 pub(crate) fn run(agent: String) -> SentraResult<()> {
-    eprintln!("{}: {agent}", t("installing agent", "正在安装 Agent"));
+    feedback::context(
+        t("Install agent", "安装 Agent"),
+        &[(t("Agent", "Agent"), agent.clone())],
+    );
     let result = agents::install_agent_with_progress(&agent, |progress| {
         eprintln!("{}", render_install_progress(&progress));
     })?;
-    println!("{}", render_install_result(&result));
+    feedback::result(
+        Status::Success,
+        install_result_title(result.action),
+        &[(t("Name", "名称"), result.agent.clone())],
+    );
     Ok(())
 }
 
 pub(crate) fn run_uninstall(agent: String) -> SentraResult<()> {
-    eprintln!("{}: {agent}", t("uninstalling agent", "正在卸载 Agent"));
+    feedback::context(
+        t("Uninstall agent", "卸载 Agent"),
+        &[(t("Agent", "Agent"), agent.clone())],
+    );
     let result = agents::uninstall_agent_with_progress(&agent, |progress| {
         eprintln!("{}", render_install_progress(&progress));
     })?;
-    println!("{}", render_install_result(&result));
+    feedback::result(
+        Status::Success,
+        t("Agent uninstalled", "Agent 已卸载"),
+        &[(t("Name", "名称"), result.agent.clone())],
+    );
     Ok(())
 }
 
+fn install_result_title(action: AgentInstallAction) -> &'static str {
+    match action {
+        AgentInstallAction::Install => t("Agent installed", "Agent 已安装"),
+        AgentInstallAction::Update => t("Agent updated", "Agent 已更新"),
+        AgentInstallAction::Uninstall => t("Agent uninstalled", "Agent 已卸载"),
+    }
+}
+
+#[cfg(test)]
 fn render_install_result(result: &AgentInstallResult) -> String {
     let action = match result.action {
         AgentInstallAction::Install => t("Installed", "已安装"),
@@ -34,12 +58,14 @@ fn render_install_result(result: &AgentInstallResult) -> String {
 
 fn render_install_progress(progress: &AgentInstallProgress) -> String {
     let verb = match progress.stage {
-        AgentInstallProgressStage::Trying => t("trying", "正在尝试"),
-        AgentInstallProgressStage::Verifying => t("verifying", "正在验证"),
+        AgentInstallProgressStage::Trying => t("Try", "尝试"),
+        AgentInstallProgressStage::Verifying => t("Verify", "验证"),
     };
-    format!(
-        "[{}/{}] {} {}",
-        progress.current, progress.total, verb, progress.method
+    feedback::render_counted_action(
+        progress.current,
+        progress.total,
+        &format!("{verb} {}", progress.method),
+        &progress.agent,
     )
 }
 
@@ -88,7 +114,7 @@ mod tests {
             stage: AgentInstallProgressStage::Trying,
         });
 
-        assert_eq!(rendered, "[2/3] trying WinGet");
+        assert_eq!(rendered, "  [2/3] Try WinGet\n  Target: codex");
         assert!(!rendered.contains("command:"));
     }
 
@@ -103,6 +129,14 @@ mod tests {
             stage: AgentInstallProgressStage::Verifying,
         });
 
-        assert_eq!(rendered, "[2/2] verifying opencode");
+        assert_eq!(rendered, "  [2/2] Verify opencode\n  Target: opencode");
+    }
+
+    #[test]
+    fn install_result_title_distinguishes_update_without_duplicate_stdout() {
+        assert_eq!(
+            install_result_title(AgentInstallAction::Update),
+            "Agent updated"
+        );
     }
 }

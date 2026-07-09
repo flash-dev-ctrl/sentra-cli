@@ -10,11 +10,12 @@ use sentra_lib::{SentraError, SentraResult, agents::discover_agents};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::args::{OutputOptions, ScanChecker, ScanResource};
-use crate::i18n::t;
-use crate::model;
-use crate::output::write_output;
-use crate::scan_support::{
+use crate::cli::args::{OutputOptions, ScanChecker, ScanResource};
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::t;
+use crate::cli::output::write_output;
+use crate::core::model;
+use crate::core::scan_support::{
     RuleLoadOutput, build_scan_options_with_cache, checker_selection, emit_scan_progress,
     finish_scan_progress, load_scanner_rules,
 };
@@ -32,15 +33,27 @@ pub(crate) async fn run(
     let mut reports = Vec::new();
     let checkers = checker_selection(&enabled_checkers);
     let mut options = build_scan_options_with_cache(&home, &checkers, no_cache)?;
+    feedback::context(
+        t("Scan assets", "扫描资产"),
+        &[
+            (t("Resource", "资源"), resource_name.clone()),
+            (
+                t("Target", "目标"),
+                path.as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| t("discovered agents", "已发现的 Agent").to_string()),
+            ),
+        ],
+    );
     if should_prompt_for_sentra_model(&enabled_checkers, &options)
         && std::io::stdout().is_terminal()
     {
-        eprintln!(
-            "{}",
+        feedback::phase(
+            Status::Warning,
             t(
                 "scan --with-llm requires a Sentra model configuration.",
-                "scan --with-llm 需要 Sentra 模型配置。"
-            )
+                "scan --with-llm 需要 Sentra 模型配置。",
+            ),
         );
         if !model::configure_sentra_model_from_all_gateways_at(&home).await? {
             return Err(SentraError::Message(
@@ -63,26 +76,35 @@ pub(crate) async fn run(
         }
     }
     let targets = if let Some(path) = path {
-        eprintln!(
-            "{} {resource_name} {}: {}",
-            t("discovering", "正在发现"),
-            t("targets from", "目标来源"),
-            path.display()
+        feedback::phase(
+            Status::Running,
+            format!(
+                "{} {resource_name} {}: {}",
+                t("Discover", "发现"),
+                t("targets from", "目标来源"),
+                path.display()
+            ),
         );
         collect_path_skill_targets(path).await?
     } else {
-        eprintln!(
-            "{} {resource_name} {}",
-            t("discovering", "正在发现"),
-            t("targets from agents", "目标，来源为 Agent")
+        feedback::phase(
+            Status::Running,
+            format!(
+                "{} {resource_name} {}",
+                t("Discover", "发现"),
+                t("targets from agents", "目标，来源为 Agent")
+            ),
         );
         collect_agent_targets(resource, &home, &agent_filters).await?
     };
-    eprintln!(
-        "{} {} {resource_name} {}",
-        t("discovered", "已发现"),
-        targets.len(),
-        t("target(s)", "个目标")
+    feedback::phase(
+        Status::Success,
+        format!(
+            "{} {} {resource_name} {}",
+            t("Discovered", "已发现"),
+            targets.len(),
+            t("target(s)", "个目标")
+        ),
     );
 
     let interactive_progress = std::io::stderr().is_terminal();
@@ -174,12 +196,15 @@ async fn collect_agent_targets(
             continue;
         }
 
-        eprintln!(
-            "{} {} {} {}",
-            t("collecting", "正在收集"),
-            resource,
-            t("from", "来源"),
-            agent.name()
+        feedback::phase(
+            Status::Running,
+            format!(
+                "{} {} {} {}",
+                t("Collect", "收集"),
+                resource,
+                t("from", "来源"),
+                agent.name()
+            ),
         );
         let agent_home = agent.home().to_path_buf();
         let agent_name = agent.name().to_string();
@@ -391,7 +416,7 @@ enum ScanTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scan_support::{build_scan_options, checker_selection};
+    use crate::core::scan_support::{build_scan_options, checker_selection};
     use sentra_lib::protocol::WireProtocol;
     use sentra_lib::risks::LlmConfig;
 

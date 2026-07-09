@@ -13,7 +13,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
@@ -26,9 +26,11 @@ use sentra_lib::protocol::{
 use sentra_lib::{SentraError, SentraResult};
 use serde::Serialize;
 
-use crate::args::{ModelAction, OutputOptions};
-use crate::i18n::{t, yes_no};
-use crate::output::write_output;
+use crate::cli::args::{ModelAction, OutputOptions};
+use crate::cli::feedback::{self, Status};
+use crate::cli::i18n::{t, yes_no};
+use crate::cli::output::write_output;
+use crate::tui::theme;
 
 pub(crate) async fn run(action: ModelAction) -> SentraResult<()> {
     match action {
@@ -232,6 +234,11 @@ fn set_at(
     model: String,
     protocol: Option<sentra_lib::protocol::WireProtocol>,
 ) -> SentraResult<()> {
+    let base_url_display = base_url.clone();
+    let model_display = model.clone();
+    let protocol_display = protocol
+        .map(|protocol| protocol.to_string())
+        .unwrap_or_else(|| "-".to_string());
     let provider = ProviderData {
         name: provider_name(&base_url),
         base_url: Some(base_url),
@@ -247,15 +254,21 @@ fn set_at(
     mutate_provider_at(home, &agent_name, |asset| {
         asset.set_provider_data(provider.clone())
     })?;
-    println!(
-        "{} {agent_name} {}",
-        t("Updated", "已更新"),
-        t("model provider", "模型供应商")
+    feedback::result(
+        Status::Success,
+        t("Model provider updated", "模型供应商已更新"),
+        &[
+            (t("Agent", "Agent"), agent_name),
+            (t("Base URL", "Base URL"), base_url_display),
+            (t("Model", "模型"), model_display),
+            (t("Protocol", "协议"), protocol_display),
+        ],
     );
     Ok(())
 }
 
 fn delete(agent_name: String, base_url: String) -> SentraResult<()> {
+    let base_url_display = base_url.clone();
     let provider = ProviderData {
         name: provider_name(&base_url),
         base_url: Some(base_url),
@@ -265,10 +278,13 @@ fn delete(agent_name: String, base_url: String) -> SentraResult<()> {
         protocol: None,
     };
     mutate_provider(&agent_name, |asset| asset.del_provider_data(&provider))?;
-    println!(
-        "{} {agent_name} {}",
-        t("Deleted", "已删除"),
-        t("model provider", "模型供应商")
+    feedback::result(
+        Status::Success,
+        t("Model provider deleted", "模型供应商已删除"),
+        &[
+            (t("Agent", "Agent"), agent_name),
+            (t("Base URL", "Base URL"), base_url_display),
+        ],
     );
     Ok(())
 }
@@ -700,17 +716,18 @@ fn render_model_tui(frame: &mut Frame<'_>, records: &[ModelRecord], state: &Mode
 
     if area.width < 80 || area.height < 24 {
         let message = Paragraph::new(vec![
-            Line::from("Sentra Model".bold()),
+            Line::from(Span::styled("Sentra Model", theme::title_style())),
             Line::from(""),
-            Line::from(
+            Line::styled(
                 t(
                     "Terminal too small. Resize to at least 80x24.",
                     "终端太小，请调整到至少 80x24。",
-                )
-                .dim(),
+                ),
+                theme::muted_style(),
             ),
         ])
-        .block(Block::default().borders(Borders::ALL));
+        .block(model_chrome_block(false))
+        .style(theme::body_style());
         frame.render_widget(message, area);
         return;
     }
@@ -754,41 +771,41 @@ fn render_model_menu(
         .enumerate()
         .map(|(index, item)| {
             let line = if index == state.menu_focus {
-                Line::from(vec![Span::raw("> "), Span::raw(*item)]).style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
+                Line::from(vec![
+                    Span::styled("> ", theme::focus_style()),
+                    Span::styled(*item, theme::focus_style()),
+                ])
             } else {
-                Line::from(vec![Span::raw("  "), Span::raw(*item)])
+                Line::from(vec![
+                    Span::styled("  ", theme::muted_style()),
+                    Span::styled(*item, theme::body_style()),
+                ])
             };
             ListItem::new(line)
         })
         .collect::<Vec<_>>();
     frame.render_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(t("Actions", "操作")),
-        ),
+        List::new(items)
+            .block(model_block(t("Actions", "操作"), true))
+            .style(theme::body_style()),
         list_area,
     );
 
     let summary = if records.is_empty() {
         vec![
-            Line::from(
+            Line::styled(
                 t(
                     "No configured model providers found.",
                     "没有已配置的模型供应商。",
-                )
-                .dim(),
+                ),
+                theme::muted_style(),
             ),
-            Line::from(
+            Line::styled(
                 t(
                     "Use Add Gateway to add baseUrl + key, then choose agent and model.",
                     "使用新增网关添加 baseUrl 和 key，然后选择 Agent 与模型。",
-                )
-                .dim(),
+                ),
+                theme::muted_style(),
             ),
         ]
     } else {
@@ -796,20 +813,19 @@ fn render_model_menu(
             .iter()
             .take(5)
             .map(|record| {
-                Line::from(format!(
-                    "{}  {}  {}",
-                    record.agent_name, record.provider_name, record.model
-                ))
+                Line::from(vec![
+                    Span::styled(format!("{:<12}", record.agent_name), theme::body_style()),
+                    Span::styled(record.provider_name.clone(), theme::secondary_style()),
+                    Span::raw("  "),
+                    Span::styled(record.model.clone(), theme::body_style()),
+                ])
             })
             .collect()
     };
     frame.render_widget(
         Paragraph::new(summary)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(t("Current", "当前")),
-            )
+            .block(model_block(t("Current", "当前"), false))
+            .style(theme::body_style())
             .wrap(Wrap { trim: false }),
         detail_area,
     );
@@ -847,11 +863,8 @@ fn render_add_gateway(frame: &mut Frame<'_>, area: Rect, state: &ModelTuiState) 
     ];
     frame.render_widget(
         Paragraph::new(field_lines(&fields, state.add_focus))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(t("Gateway", "网关")),
-            )
+            .block(model_block(t("Gateway", "网关"), true))
+            .style(theme::body_style())
             .wrap(Wrap { trim: false }),
         form_area,
     );
@@ -911,7 +924,7 @@ struct SwitchLayout {
 fn switch_layout(area: Rect) -> SwitchLayout {
     let [header, status, body, footer] = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(2),
+        Constraint::Length(3),
         Constraint::Min(10),
         Constraint::Length(2),
     ])
@@ -935,12 +948,9 @@ fn render_agent_column(frame: &mut Frame<'_>, area: Rect, state: &ModelTuiState)
         })
         .collect::<Vec<_>>();
     frame.render_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(t("Agents", "Agent"))
-                .border_style(focus_border(state.focus_pane == 0)),
-        ),
+        List::new(items)
+            .block(model_block(t("Agents", "Agent"), state.focus_pane == 0))
+            .style(theme::body_style()),
         area,
     );
 }
@@ -956,12 +966,9 @@ fn render_provider_column(frame: &mut Frame<'_>, area: Rect, state: &ModelTuiSta
         })
         .collect::<Vec<_>>();
     frame.render_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(t("Gateways", "网关"))
-                .border_style(focus_border(state.focus_pane == 1)),
-        ),
+        List::new(items)
+            .block(model_block(t("Gateways", "网关"), state.focus_pane == 1))
+            .style(theme::body_style()),
         area,
     );
 }
@@ -979,23 +986,19 @@ fn render_model_column(frame: &mut Frame<'_>, area: Rect, state: &ModelTuiState)
         .take(visible_height)
         .map(|(index, model)| {
             let result = state.model_probe_result(model);
-            let title = model_column_title_with_index(model, index + 1, result.status);
-            let mut item = switch_item(index == state.model_focus, state.focus_pane == 2, title);
-            item = item.style(match result.status {
-                ModelProbeStatus::Testing => Style::default().fg(Color::Yellow),
-                ModelProbeStatus::Available => Style::default().fg(Color::Green),
-                ModelProbeStatus::Unavailable => Style::default().fg(Color::DarkGray),
-            });
-            item
+            model_switch_item(
+                index == state.model_focus,
+                state.focus_pane == 2,
+                index + 1,
+                model,
+                result.status,
+            )
         })
         .collect::<Vec<_>>();
     frame.render_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(t("Models", "模型"))
-                .border_style(focus_border(state.focus_pane == 2)),
-        ),
+        List::new(items)
+            .block(model_block(t("Models", "模型"), state.focus_pane == 2))
+            .style(theme::body_style()),
         area,
     );
 }
@@ -1004,11 +1007,8 @@ fn render_gateway_status(frame: &mut Frame<'_>, area: Rect, state: &ModelTuiStat
     let line = gateway_status_line(state);
     frame.render_widget(
         Paragraph::new(line)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(t("Status", "状态")),
-            )
+            .block(model_block(t("Status", "状态"), false))
+            .style(theme::body_style())
             .wrap(Wrap { trim: false }),
         area,
     );
@@ -1045,6 +1045,7 @@ fn model_column_title(model: &ModelChoice) -> String {
     format!("{}  [{}]", model.name, model_status_label(model.status))
 }
 
+#[cfg(test)]
 fn model_column_title_with_index(
     model: &ModelChoice,
     index: usize,
@@ -1104,37 +1105,95 @@ fn model_status_label(status: ModelProbeStatus) -> &'static str {
 }
 
 fn switch_item(selected: bool, focused: bool, title: String) -> ListItem<'static> {
-    let pointer = if selected { "> " } else { "  " };
-    let style = if selected && focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    ListItem::new(Line::from(vec![Span::raw(pointer), Span::raw(title)]).style(style))
+    let spans = vec![Span::styled(title, switch_text_style(selected, focused))];
+    ListItem::new(switch_line(selected, focused, spans))
 }
 
-fn focus_border(focused: bool) -> Style {
-    if focused {
-        Style::default().fg(Color::Cyan)
+fn model_switch_item(
+    selected: bool,
+    focused: bool,
+    index: usize,
+    model: &ModelChoice,
+    status: ModelProbeStatus,
+) -> ListItem<'static> {
+    let text_style = switch_text_style(selected, focused);
+    let status_style = if selected && focused {
+        theme::focus_style()
     } else {
-        Style::default()
-    }
+        match status {
+            ModelProbeStatus::Testing => theme::warning_style(),
+            ModelProbeStatus::Available => theme::success_style(),
+            ModelProbeStatus::Unavailable => theme::muted_style(),
+        }
+    };
+    let spans = vec![
+        Span::styled(format!("{index}. {}  ", model.name), text_style),
+        Span::styled(format!("[{}]", model_status_label(status)), status_style),
+    ];
+    ListItem::new(switch_line(selected, focused, spans))
 }
 
 fn render_panel_header(frame: &mut Frame<'_>, area: Rect, title: &str, subtitle: &str) {
     frame.render_widget(
-        Paragraph::new(vec![Line::from(title.bold()), Line::from(subtitle.dim())])
-            .block(Block::default().borders(Borders::ALL))
-            .alignment(Alignment::Left),
+        Paragraph::new(vec![
+            Line::from(Span::styled(title.to_string(), theme::title_style())),
+            Line::from(Span::styled(subtitle.to_string(), theme::muted_style())),
+        ])
+        .block(model_chrome_block(false))
+        .style(theme::body_style())
+        .alignment(Alignment::Left),
         area,
     );
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, keys: &str, state: &ModelTuiState) {
     let status = state.status.as_deref().unwrap_or(keys);
-    frame.render_widget(Paragraph::new(status).dim(), area);
+    let style = if state.status.is_some() {
+        theme::info_style()
+    } else {
+        theme::muted_style()
+    };
+    frame.render_widget(Paragraph::new(status).style(style), area);
+}
+
+fn model_chrome_block(focused: bool) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border_style(focused))
+}
+
+fn model_block(title: &'static str, focused: bool) -> Block<'static> {
+    model_chrome_block(focused)
+        .title(title)
+        .title_style(if focused {
+            theme::focus_style()
+        } else {
+            theme::title_style()
+        })
+}
+
+fn switch_line(
+    selected: bool,
+    focused: bool,
+    spans: impl IntoIterator<Item = Span<'static>>,
+) -> Line<'static> {
+    let pointer = if selected { "> " } else { "  " };
+    let pointer_style = if selected && focused {
+        theme::focus_style()
+    } else {
+        theme::muted_style()
+    };
+    let mut line_spans = vec![Span::styled(pointer, pointer_style)];
+    line_spans.extend(spans);
+    Line::from(line_spans)
+}
+
+fn switch_text_style(selected: bool, focused: bool) -> Style {
+    if selected && focused {
+        theme::focus_style()
+    } else {
+        theme::body_style()
+    }
 }
 
 fn field_lines(fields: &[(&str, &str, bool)], focus: usize) -> Vec<Line<'static>> {
@@ -1144,11 +1203,9 @@ fn field_lines(fields: &[(&str, &str, bool)], focus: usize) -> Vec<Line<'static>
         .flat_map(|(index, (label, value, secret))| {
             let marker = if index == focus { "> " } else { "  " };
             let style = if index == focus {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+                theme::focus_style()
             } else {
-                Style::default()
+                theme::body_style()
             };
             let display = if *secret && !value.is_empty() {
                 mask_secret(value)
@@ -1158,7 +1215,7 @@ fn field_lines(fields: &[(&str, &str, bool)], focus: usize) -> Vec<Line<'static>
             [
                 Line::from(vec![
                     Span::styled(marker.to_string(), style),
-                    Span::styled(format!("{label:<8} "), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{label:<8} "), theme::muted_style()),
                     Span::styled(display, style),
                 ]),
                 Line::from(""),
@@ -1650,15 +1707,18 @@ impl ModelTuiState {
                 probe_requests: default_probe_requests(),
             });
         }
-        let models = self.model_candidates();
-        let provider = ProviderRecord {
+        let mut provider = ProviderRecord {
             name: provider_name(base_url.trim()),
             base_url: base_url.trim().to_string(),
             api_key: Some(api_key.trim().to_string()),
             enabled: true,
-            models,
+            models: Vec::new(),
             temporary: true,
         };
+        provider.models = fetch_gateway_models(&provider);
+        if provider.models.is_empty() {
+            provider.models = self.model_candidates();
+        }
         self.gateways.push(provider);
         self.provider_focus = self.gateways.len().saturating_sub(1);
         self.model_focus = 0;
@@ -1808,9 +1868,30 @@ fn move_index(current: usize, len: usize, delta: isize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn assert_cell_fg(backend: &TestBackend, text: &str, color: Color) {
+        let (x, y) = find_text(backend, text);
+        assert_eq!(backend.buffer()[(x, y)].fg, color, "{text}");
+    }
+
+    fn find_text(backend: &TestBackend, needle: &str) -> (u16, u16) {
+        let buffer = backend.buffer();
+        for y in 0..buffer.area.height {
+            let mut line = String::new();
+            for x in 0..buffer.area.width {
+                line.push_str(buffer[(x, y)].symbol());
+            }
+            if let Some(x) = line.find(needle) {
+                return (x as u16, y);
+            }
+        }
+        panic!("did not find {needle:?}");
     }
 
     struct ProbeServer {
@@ -1882,7 +1963,11 @@ mod tests {
 
         let mut request_body = vec![0; content_length];
         reader.read_exact(&mut request_body).unwrap();
-        let request_body = serde_json::from_slice(&request_body).unwrap();
+        let request_body = if request_body.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&request_body).unwrap()
+        };
         tx.send(ObservedProbeRequest {
             path,
             body: request_body,
@@ -1905,6 +1990,60 @@ mod tests {
 
         assert_eq!(state.menu_items(), ["Configure Model", "Add Gateway"]);
         assert_eq!(state.mode, ModelTuiMode::Menu);
+    }
+
+    #[test]
+    fn model_tui_menu_uses_theme_colors_for_visible_chrome() {
+        let records = vec![ModelRecord {
+            agent_name: "codex".to_string(),
+            agent_title: "Codex".to_string(),
+            agent_home: PathBuf::from("/home/codex"),
+            provider_name: "gateway.example.test".to_string(),
+            base_url: Some("https://gateway.example.test/api".to_string()),
+            enabled: true,
+            has_api_key: true,
+            model: "gpt-test".to_string(),
+            protocol: Some("responses".to_string()),
+        }];
+        let state = ModelTuiState::new();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render_model_tui(frame, &records, &state))
+            .unwrap();
+
+        let backend = terminal.backend();
+        assert_cell_fg(
+            backend,
+            "Sentra Model",
+            theme::title_style().fg.expect("title color"),
+        );
+        assert_cell_fg(
+            backend,
+            "Actions",
+            theme::focus_style().fg.expect("focus color"),
+        );
+        assert_cell_fg(
+            backend,
+            "Current",
+            theme::title_style().fg.expect("title color"),
+        );
+        assert_cell_fg(
+            backend,
+            "codex",
+            theme::body_style().fg.expect("body color"),
+        );
+        assert_cell_fg(
+            backend,
+            "gateway.example.test",
+            theme::secondary_style().fg.expect("secondary color"),
+        );
+        assert_cell_fg(
+            backend,
+            "[Enter]",
+            theme::muted_style().fg.expect("muted color"),
+        );
     }
 
     #[test]
@@ -1999,6 +2138,58 @@ mod tests {
         assert_eq!(provider.base_url, "https://gateway.example.test/api");
         assert_eq!(provider.api_key.as_deref(), Some("sk-test"));
         assert!(provider.temporary);
+    }
+
+    #[test]
+    fn add_gateway_uses_models_from_new_gateway_not_existing_gateway_union() {
+        let server = run_probe_server(
+            200,
+            r#"{"data":[{"id":"fresh-gpt"},{"id":"fresh-mini"}]}"#,
+        );
+        let base_url = server.base_url.clone();
+        let mut state = ModelTuiState::with_catalog(ModelCatalog {
+            agents: vec![AgentProviderEntry {
+                agent_name: "codex".to_string(),
+                agent_title: "Codex".to_string(),
+                probe_requests: Vec::new(),
+            }],
+            gateways: vec![ProviderRecord {
+                name: "existing".to_string(),
+                base_url: "https://existing.example.test/api".to_string(),
+                api_key: Some("sk-existing".to_string()),
+                enabled: true,
+                models: vec![
+                    ModelChoice {
+                        id: "existing-a".to_string(),
+                        name: "existing-a".to_string(),
+                        enabled: true,
+                        status: ModelProbeStatus::Testing,
+                        protocol: None,
+                    },
+                    ModelChoice {
+                        id: "existing-b".to_string(),
+                        name: "existing-b".to_string(),
+                        enabled: true,
+                        status: ModelProbeStatus::Testing,
+                        protocol: None,
+                    },
+                ],
+                temporary: false,
+            }],
+        });
+
+        state.add_gateway(&base_url, "sk-new");
+
+        let request = server.request();
+        assert_eq!(request.path, "/models");
+        let provider = state.current_provider().unwrap();
+        let model_ids = provider
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(model_ids, ["fresh-gpt", "fresh-mini"]);
+        assert_eq!(gateway_column_title(&state, provider), "127.0.0.1 + (0/2)");
     }
 
     #[test]
@@ -2167,6 +2358,7 @@ mod tests {
         assert!(layout.header.y < layout.status.y);
         assert!(layout.status.y < layout.body.y);
         assert!(layout.body.y < layout.footer.y);
+        assert_eq!(layout.status.height, 3);
     }
 
     #[test]
@@ -2198,6 +2390,52 @@ mod tests {
         assert!(line.contains("Base URL: https://ai-api-gateway.app.baizhi.cloud/api/openai"));
         assert!(line.contains("Key: sk-1****7890"));
         assert!(!line.contains("sk-1234567890"));
+    }
+
+    #[test]
+    fn switch_view_renders_selected_gateway_base_url_and_masked_key() {
+        let mut state = ModelTuiState::with_catalog(ModelCatalog {
+            agents: vec![AgentProviderEntry {
+                agent_name: "codex".to_string(),
+                agent_title: "Codex".to_string(),
+                probe_requests: Vec::new(),
+            }],
+            gateways: vec![ProviderRecord {
+                name: "gateway".to_string(),
+                base_url: "https://ai-api-gateway.app.baizhi.cloud/api/openai".to_string(),
+                api_key: Some("sk-1234567890".to_string()),
+                enabled: true,
+                models: Vec::new(),
+                temporary: false,
+            }],
+        });
+        state.mode = ModelTuiMode::Switch;
+        state.focus_pane = 1;
+        let backend = TestBackend::new(140, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render_model_tui(frame, &[], &state))
+            .unwrap();
+
+        let backend = terminal.backend();
+        find_text(
+            backend,
+            "Base URL: https://ai-api-gateway.app.baizhi.cloud/api/openai",
+        );
+        find_text(backend, "Key: sk-1****7890");
+        let buffer = backend.buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|y| {
+                let mut line = String::new();
+                for x in 0..buffer.area.width {
+                    line.push_str(buffer[(x, y)].symbol());
+                }
+                line
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!rendered.contains("sk-1234567890"));
     }
 
     #[test]
