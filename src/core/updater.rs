@@ -150,11 +150,7 @@ async fn install_version(version: &str) -> SentraResult<()> {
 
 fn run_installer(version: &str) -> SentraResult<()> {
     let status = if cfg!(windows) {
-        let command = format!(
-            "$env:SENTRA_VERSION = '{}'; irm -TimeoutSec 15 {} | iex",
-            escape_powershell_single_quoted(version),
-            INSTALL_PS1_URL
-        );
+        let command = windows_installer_command(version, std::process::id());
         ProcessCommand::new("powershell")
             .args([
                 "-NoProfile",
@@ -188,6 +184,15 @@ fn run_installer(version: &str) -> SentraResult<()> {
             t("installer failed", "安装脚本失败")
         )))
     }
+}
+
+fn windows_installer_command(version: &str, parent_pid: u32) -> String {
+    format!(
+        "$env:SENTRA_VERSION = '{}'; $env:SENTRA_PARENT_PID = '{}'; irm -TimeoutSec 15 {} | iex",
+        escape_powershell_single_quoted(version),
+        parent_pid,
+        INSTALL_PS1_URL
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -499,5 +504,21 @@ mod tests {
         let loaded = load_state(&path).unwrap();
 
         assert_eq!(loaded.next_check_at, 42);
+    }
+
+    #[test]
+    fn windows_installer_command_passes_parent_pid_for_self_replace() {
+        let command = windows_installer_command("v1.2.3", 1234);
+
+        assert!(command.contains("$env:SENTRA_VERSION = 'v1.2.3'"));
+        assert!(command.contains("$env:SENTRA_PARENT_PID = '1234'"));
+        assert!(command.contains(INSTALL_PS1_URL));
+    }
+
+    #[test]
+    fn windows_installer_command_escapes_single_quotes() {
+        let command = windows_installer_command("v1.2.3'oops", 1234);
+
+        assert!(command.contains("$env:SENTRA_VERSION = 'v1.2.3''oops'"));
     }
 }

@@ -4,6 +4,63 @@ $repo = if ($env:SENTRA_REPO) { $env:SENTRA_REPO } else { "flash-dev-ctrl/sentra
 $version = if ($env:SENTRA_VERSION) { $env:SENTRA_VERSION } else { "latest" }
 $installDir = if ($env:SENTRA_INSTALL_DIR) { $env:SENTRA_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".sentra\bin" }
 
+function ConvertTo-PowerShellLiteral {
+    param([string]$Value)
+
+    "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Start-SentraDeferredReplace {
+    param(
+        [string]$Source,
+        [string]$Target,
+        [int]$ParentPid
+    )
+
+    $deferDir = Join-Path $env:TEMP ("sentra-replace-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $deferDir | Out-Null
+
+    $pending = Join-Path $deferDir "sentra.exe"
+    Copy-Item -Force -LiteralPath $Source -Destination $pending
+
+    $sourceLiteral = ConvertTo-PowerShellLiteral $pending
+    $targetLiteral = ConvertTo-PowerShellLiteral $Target
+    $deferDirLiteral = ConvertTo-PowerShellLiteral $deferDir
+    $script = @"
+`$ErrorActionPreference = "Stop"
+`$source = $sourceLiteral
+`$target = $targetLiteral
+`$deferDir = $deferDirLiteral
+try {
+    try {
+        Wait-Process -Id $ParentPid -ErrorAction SilentlyContinue
+    } catch {
+    }
+
+    `$installed = `$false
+    for (`$attempt = 0; `$attempt -lt 120; `$attempt++) {
+        try {
+            Copy-Item -Force -LiteralPath `$source -Destination `$target
+            & `$target --help | Out-Null
+            `$installed = `$true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    if (!`$installed) {
+        throw "timed out replacing `$target"
+    }
+} finally {
+    Remove-Item -Force -LiteralPath `$source -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force -LiteralPath `$deferDir -ErrorAction SilentlyContinue
+}
+"@
+    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($script))
+    Start-Process -FilePath "powershell" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded) -WindowStyle Hidden
+}
+
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 switch ($arch) {
     "x64" { $asset = "sentra-windows-x86_64-static.zip" }
@@ -33,7 +90,17 @@ try {
     }
 
     $target = Join-Path $installDir "sentra.exe"
-    Copy-Item -Force $exe.FullName $target
+    $deferred = $false
+    try {
+        Copy-Item -Force -LiteralPath $exe.FullName -Destination $target
+    } catch [System.IO.IOException] {
+        if (!$env:SENTRA_PARENT_PID) {
+            throw
+        }
+
+        Start-SentraDeferredReplace -Source $exe.FullName -Target $target -ParentPid ([int]$env:SENTRA_PARENT_PID)
+        $deferred = $true
+    }
 
     $path = [Environment]::GetEnvironmentVariable("Path", "User")
     if (($path -split ";") -notcontains $installDir) {
@@ -43,8 +110,12 @@ try {
         Write-Host "Added to user PATH: $installDir"
     }
 
-    Write-Host "sentra installed to $target"
-    & $target --help | Out-Null
+    if ($deferred) {
+        Write-Host "sentra update scheduled; it will complete after this command exits: $target"
+    } else {
+        Write-Host "sentra installed to $target"
+        & $target --help | Out-Null
+    }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
