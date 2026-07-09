@@ -1,0 +1,4 @@
+interface:
+  display_name: "CLI Design"
+  short_description: "Design trustworthy modern CLI experiences"
+  default_prompt: "Use $cli-design to design a clear, trustworthy CLI experience for this command or developer tool."
