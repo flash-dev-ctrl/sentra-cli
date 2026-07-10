@@ -53,6 +53,10 @@ async fn execute(command: &Command) -> SentraResult<()> {
             args::print_help();
             Ok(())
         }
+        Command::Version => {
+            args::print_version();
+            Ok(())
+        }
         Command::ListHelp => {
             args::print_list_help();
             Ok(())
@@ -87,11 +91,13 @@ async fn execute(command: &Command) -> SentraResult<()> {
         }
         Command::List {
             resource,
+            home,
             agent,
             output,
         } => {
-            config::initialize()?;
-            list::run(*resource, agent.as_deref(), output.clone()).await
+            let home = list::resolve_home(home.as_deref())?;
+            config::initialize_at(&home)?;
+            list::run(*resource, &home, agent.as_deref(), output.clone()).await
         }
         Command::Scan {
             resource,

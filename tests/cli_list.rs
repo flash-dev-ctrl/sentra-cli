@@ -1,22 +1,103 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+const FIXTURE_CODEX_AUTH: &str = include_str!("../fixtures/provider/.codex/auth.json");
+const FIXTURE_CODEX_CONFIG: &str = include_str!("../fixtures/provider/.codex/config.toml");
+const FIXTURE_CLAUDE_CONFIG: &str = include_str!("../fixtures/provider/.claude.json");
+const FIXTURE_CLAUDE_SETTINGS: &str = include_str!("../fixtures/provider/.claude/settings.json");
+
+fn account_home_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/provider")
+}
+
+fn write_codex_provider_fixture(home: &Path) -> serde_json::Value {
+    let codex_home = home.join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(codex_home.join("auth.json"), FIXTURE_CODEX_AUTH).unwrap();
+    fs::write(codex_home.join("config.toml"), FIXTURE_CODEX_CONFIG).unwrap();
+    serde_json::from_str(FIXTURE_CODEX_AUTH).unwrap()
+}
+
+fn write_claude_provider_fixture(home: &Path) -> serde_json::Value {
+    let claude_home = home.join(".claude");
+    fs::create_dir_all(&claude_home).unwrap();
+    fs::write(home.join(".claude.json"), FIXTURE_CLAUDE_CONFIG).unwrap();
+    fs::write(claude_home.join("settings.json"), FIXTURE_CLAUDE_SETTINGS).unwrap();
+    serde_json::from_str(FIXTURE_CLAUDE_CONFIG).unwrap()
+}
+
+fn provider_by_type<'a>(
+    providers: &'a [serde_json::Value],
+    provider_type: &str,
+) -> &'a serde_json::Value {
+    providers
+        .iter()
+        .find(|provider| provider["providerType"] == provider_type)
+        .unwrap_or_else(|| panic!("missing provider type {provider_type}"))
+}
 
 #[test]
 fn sentra_help_supports_language_switch() {
-    let english = sentra_command().arg("--help").output().unwrap();
+    let english = sentra_command()
+        .arg("--help")
+        .env_remove("SENTRA_LANG")
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env("LANG", "en_US.UTF-8")
+        .env_remove("LANGUAGE")
+        .output()
+        .unwrap();
     assert!(english.status.success());
     let english_stdout = String::from_utf8_lossy(&english.stdout);
+    assert!(english_stdout.contains(&format!("sentra {}", env!("CARGO_PKG_VERSION"))));
     assert!(english_stdout.contains("Usage:"));
+    assert!(english_stdout.contains("-v, --version"));
     assert!(english_stdout.contains("--lang <en|zh>"));
+
+    let automatic_chinese = sentra_command()
+        .arg("--help")
+        .env_remove("SENTRA_LANG")
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env("LANG", "zh_CN.UTF-8")
+        .env_remove("LANGUAGE")
+        .output()
+        .unwrap();
+    assert!(automatic_chinese.status.success());
+    let automatic_chinese_stdout = String::from_utf8_lossy(&automatic_chinese.stdout);
+    assert!(automatic_chinese_stdout.contains(&format!("sentra {}", env!("CARGO_PKG_VERSION"))));
+    assert!(automatic_chinese_stdout.contains("用法:"));
+    assert!(automatic_chinese_stdout.contains("-v, --version"));
+    assert!(automatic_chinese_stdout.contains("显示语言"));
 
     let chinese = sentra_command()
         .args(["--lang", "zh", "--help"])
+        .env_remove("SENTRA_LANG")
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env("LANG", "en_US.UTF-8")
+        .env_remove("LANGUAGE")
         .output()
         .unwrap();
     assert!(chinese.status.success());
     let chinese_stdout = String::from_utf8_lossy(&chinese.stdout);
     assert!(chinese_stdout.contains("用法:"));
     assert!(chinese_stdout.contains("显示语言"));
+}
+
+#[test]
+fn sentra_version_flags_print_version() {
+    for flag in ["-v", "--version"] {
+        let output = sentra_command().arg(flag).output().unwrap();
+
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("sentra {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
 }
 
 #[test]
@@ -160,9 +241,11 @@ experimental_bearer_token = "sk-test"
     assert!(stdout.contains("Providers (1)"));
     assert!(stdout.contains("AGENT"));
     assert!(stdout.contains("PROVIDER"));
+    assert!(stdout.contains("TYPE"));
     assert!(stdout.contains("BASE URL"));
     assert!(stdout.contains("codex"));
     assert!(stdout.contains("OpenAI"));
+    assert!(stdout.contains("gateway"));
     assert!(stdout.contains("https://api.openai.com/v1"));
     assert!(!stdout.contains("sk-test"));
 }
@@ -295,8 +378,200 @@ experimental_bearer_token = "sk-test"
 
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0]["type"], "provider");
+    assert_eq!(assets[0]["data"][0]["providerType"], "gateway");
     assert_eq!(assets[0]["data"][0]["baseUrl"], "https://api.openai.com/v1");
     assert!(assets[0].get("providerRequests").is_none());
+}
+
+#[test]
+fn sentra_list_provider_collects_codex_chatgpt_account_without_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let auth = write_codex_provider_fixture(dir.path());
+    let id_token = auth["tokens"]["id_token"].as_str().unwrap();
+    let access_token = auth["tokens"]["access_token"].as_str().unwrap();
+    let refresh_token = auth["tokens"]["refresh_token"].as_str().unwrap();
+
+    let output = sentra_command()
+        .args(["list", "provider", "--agent", "codex", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(refresh_token));
+    assert!(!stdout.contains(id_token));
+    assert!(!stdout.contains(access_token));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+    let providers = assets[0]["data"].as_array().unwrap();
+    let gateway = provider_by_type(providers, "gateway");
+    let provider = provider_by_type(providers, "codex_account");
+
+    assert_eq!(gateway["name"], "Codex Fixture Gateway");
+    assert_eq!(gateway["baseUrl"], "https://codex-gateway.example.test/v1");
+    assert_eq!(gateway["models"][0]["id"], "gpt-fixture");
+    assert_eq!(provider["providerType"], "codex_account");
+    assert_eq!(provider["name"], "Codex User");
+    assert_eq!(provider["account"]["accountId"], "acct_codex");
+    assert_eq!(provider["account"]["email"], "codex@example.test");
+    assert_eq!(provider["account"]["plan"], "pro");
+    assert_eq!(provider["account"]["organizationId"], "org_codex");
+    assert_eq!(provider["account"]["organizationName"], "Codex Org");
+    assert_eq!(provider["account"]["hasIdToken"], true);
+    assert_eq!(provider["account"]["hasAccessToken"], true);
+    assert_eq!(provider["account"]["hasRefreshToken"], true);
+    assert_eq!(
+        provider["account"]["lastRefresh"],
+        "2026-07-01T08:06:36.506807Z"
+    );
+    assert_eq!(provider["account"]["metadata"]["emailVerified"], true);
+    assert!(provider["baseUrl"].is_null());
+    assert!(provider["apiKey"].is_null());
+}
+
+#[test]
+fn sentra_list_provider_collects_claude_oauth_account_without_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let credentials = write_claude_provider_fixture(dir.path());
+    let access_token = credentials["claudeAiOauth"]["accessToken"]
+        .as_str()
+        .unwrap();
+    let refresh_token = credentials["claudeAiOauth"]["refreshToken"]
+        .as_str()
+        .unwrap();
+
+    let output = sentra_command()
+        .args([
+            "list",
+            "provider",
+            "--agent",
+            "claude-cli",
+            "--format",
+            "json",
+        ])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(access_token));
+    assert!(!stdout.contains(refresh_token));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+    let providers = assets[0]["data"].as_array().unwrap();
+    let gateway = provider_by_type(providers, "gateway");
+    let provider = provider_by_type(providers, "claude_account");
+
+    assert_eq!(gateway["name"], "claude-gateway.example.test");
+    assert_eq!(gateway["baseUrl"], "https://claude-gateway.example.test");
+    assert_eq!(gateway["models"][0]["id"], "claude-fixture-sonnet");
+    assert_eq!(provider["providerType"], "claude_account");
+    assert_eq!(provider["name"], "Claude User");
+    assert_eq!(provider["account"]["accountId"], "acct_claude");
+    assert_eq!(provider["account"]["email"], "claude@example.test");
+    assert_eq!(provider["account"]["organizationId"], "org_claude");
+    assert_eq!(provider["account"]["organizationName"], "Claude Org");
+    assert_eq!(provider["account"]["organizationRole"], "admin");
+    assert_eq!(provider["account"]["organizationType"], "claude_max");
+    assert_eq!(provider["account"]["billingType"], "apple_subscription");
+    assert_eq!(provider["account"]["hasExtraUsageEnabled"], true);
+    assert_eq!(provider["account"]["hasAccessToken"], true);
+    assert_eq!(provider["account"]["hasRefreshToken"], true);
+    assert_eq!(
+        provider["account"]["metadata"]["organizationRateLimitTier"],
+        "default_claude_max_5x"
+    );
+    assert_eq!(provider["account"]["profileFetchedAt"], 1783587822367u64);
+    assert!(provider["baseUrl"].is_null());
+    assert!(provider["apiKey"].is_null());
+}
+
+#[test]
+fn sentra_list_provider_accepts_home_path_fixture() {
+    let home = account_home_fixture();
+    let codex_auth: serde_json::Value = serde_json::from_str(FIXTURE_CODEX_AUTH).unwrap();
+    let claude_credentials: serde_json::Value =
+        serde_json::from_str(FIXTURE_CLAUDE_CONFIG).unwrap();
+
+    let output = sentra_command()
+        .args([
+            "list",
+            "provider",
+            "--home",
+            home.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(codex_auth["tokens"]["id_token"].as_str().unwrap()));
+    assert!(!stdout.contains(codex_auth["tokens"]["access_token"].as_str().unwrap()));
+    assert!(!stdout.contains(codex_auth["tokens"]["refresh_token"].as_str().unwrap()));
+    assert!(
+        !stdout.contains(
+            claude_credentials["claudeAiOauth"]["accessToken"]
+                .as_str()
+                .unwrap()
+        )
+    );
+    assert!(
+        !stdout.contains(
+            claude_credentials["claudeAiOauth"]["refreshToken"]
+                .as_str()
+                .unwrap()
+        )
+    );
+
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+    let codex = assets
+        .iter()
+        .find(|asset| asset["agentName"] == "codex")
+        .expect("missing codex provider asset");
+    let claude = assets
+        .iter()
+        .find(|asset| asset["agentName"] == "claude-cli")
+        .expect("missing claude provider asset");
+
+    let codex_providers = codex["data"].as_array().unwrap();
+    let claude_providers = claude["data"].as_array().unwrap();
+    assert_eq!(
+        provider_by_type(codex_providers, "gateway")["baseUrl"],
+        "https://codex-gateway.example.test/v1"
+    );
+    assert_eq!(
+        provider_by_type(codex_providers, "codex_account")["account"]["email"],
+        "codex@example.test"
+    );
+    assert_eq!(
+        provider_by_type(claude_providers, "gateway")["baseUrl"],
+        "https://claude-gateway.example.test"
+    );
+    assert_eq!(
+        provider_by_type(claude_providers, "claude_account")["account"]["email"],
+        "claude@example.test"
+    );
 }
 
 #[test]
@@ -517,6 +792,48 @@ fn sentra_model_lists_provider_models_without_api_keys() {
     assert!(stdout.contains("api.example.test"));
     assert!(stdout.contains("gpt-test"));
     assert!(!stdout.contains("sk-test-secret"));
+}
+
+#[test]
+fn sentra_model_lists_gateway_providers_and_skips_account_type_providers() {
+    let dir = tempfile::tempdir().unwrap();
+    let auth = write_codex_provider_fixture(dir.path());
+    let credentials = write_claude_provider_fixture(dir.path());
+    let refresh_token = auth["tokens"]["refresh_token"].as_str().unwrap();
+    let claude_access_token = credentials["claudeAiOauth"]["accessToken"]
+        .as_str()
+        .unwrap();
+
+    let output = sentra_command()
+        .args(["model", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("codex_account"));
+    assert!(!stdout.contains("claude_account"));
+    assert!(!stdout.contains(refresh_token));
+    assert!(!stdout.contains(claude_access_token));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let models = value.as_array().unwrap();
+    assert_eq!(models.len(), 2);
+    assert!(models.iter().any(|model| {
+        model["agentName"] == "codex"
+            && model["providerType"] == "gateway"
+            && model["model"] == "gpt-fixture"
+    }));
+    assert!(models.iter().any(|model| {
+        model["agentName"] == "claude-cli"
+            && model["providerType"] == "gateway"
+            && model["model"] == "claude-fixture-sonnet"
+    }));
 }
 
 #[test]
@@ -938,6 +1255,55 @@ base_url = "https://api.openai.com/v1"
     assert_eq!(
         scans[0]["report"]["metadata"]["scanner"],
         "provider-scanner"
+    );
+}
+
+#[test]
+fn sentra_scan_provider_accepts_account_type_provider_without_base_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let auth = write_codex_provider_fixture(dir.path());
+    let refresh_token = auth["tokens"]["refresh_token"].as_str().unwrap();
+
+    let output = sentra_command()
+        .args(["scan", "provider", "--agent", "codex", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(refresh_token));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let scans = value.as_array().unwrap();
+    let account_scan = scans
+        .iter()
+        .find(|scan| scan["name"] == "Codex User")
+        .expect("missing codex account provider scan");
+
+    assert_eq!(scans.len(), 2);
+    assert!(
+        scans
+            .iter()
+            .any(|scan| scan["name"] == "Codex Fixture Gateway")
+    );
+    assert_eq!(account_scan["type"], "provider");
+    assert_eq!(account_scan["agent"], "codex");
+    assert!(
+        account_scan["report"]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        account_scan["report"]["errors"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
 }
 
@@ -1578,11 +1944,11 @@ fn sentra_list_help_prints_usage() {
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron>"));
+    assert!(stdout.contains("--home <path>"));
     assert!(stdout.contains("--agent <name>"));
     assert!(stdout.contains("Examples:"));
     assert!(!stdout.contains("sentra scan <skill|cron|memory|provider>"));
     assert!(!stdout.contains("sentra skill add <url>"));
-    assert!(!stdout.contains("--home"));
 }
 
 #[test]
@@ -1625,6 +1991,7 @@ fn sentra_root_help_prints_command_index_only() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&format!("sentra {}", env!("CARGO_PKG_VERSION"))));
     assert!(stdout.contains("Usage:"));
     assert!(stdout.contains("sentra <command> [args...]"));
     assert!(stdout.contains("Commands:"));
@@ -1636,6 +2003,7 @@ fn sentra_root_help_prints_command_index_only() {
     assert!(stdout.contains("model"));
     assert!(stdout.contains("skill"));
     assert!(stdout.contains("Use 'sentra <command> --help'"));
+    assert!(stdout.contains("-v, --version"));
     assert!(!stdout.contains("sentra scan <skill|cron|memory|provider> [path]"));
     assert!(!stdout.contains("sentra model set --agent <name>"));
     assert!(!stdout.contains("--with-xxx"));

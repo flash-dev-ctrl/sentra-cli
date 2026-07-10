@@ -1709,8 +1709,14 @@ mod tests {
         app.wait_for_mutation_result(rx, "Installing", 4, 5, "canvas-design", &mut redraw)
             .unwrap();
 
-        assert!(statuses.iter().any(|status| status.starts_with("| ")));
-        assert!(statuses.iter().any(|status| status.starts_with("/ ")));
+        let waiting_statuses = statuses
+            .iter()
+            .filter(|status| status.ends_with("Installing 5/5 canvas-design"))
+            .collect::<Vec<_>>();
+        assert!(!waiting_statuses.is_empty());
+        assert!(waiting_statuses.iter().all(|status| {
+            matches!(status.as_bytes().first(), Some(b'|' | b'/' | b'-' | b'\\'))
+        }));
     }
 
     fn buffer_text(backend: &TestBackend) -> String {
