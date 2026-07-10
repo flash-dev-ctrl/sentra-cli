@@ -105,12 +105,17 @@ async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>>
         let agent_title = agent.title().to_string();
         for asset in agent.get_assets(AssetType::Provider)? {
             for provider in provider_items(asset.data_async().await?)? {
+                if provider.provider_type != sentra_lib::interfaces::ProviderType::Gateway {
+                    continue;
+                }
                 for model in provider.models.iter().filter(|model| model.enabled) {
                     records.push(ModelRecord {
                         agent_name: agent.name().to_string(),
                         agent_title: agent_title.clone(),
                         agent_home: agent.home().to_path_buf(),
                         provider_name: provider.name.clone(),
+                        provider_type: provider_type_label(provider.provider_type),
+                        account: provider_account_label(provider.account.as_ref()),
                         base_url: provider.base_url.clone(),
                         enabled: provider.enabled,
                         has_api_key: provider.api_key.is_some(),
@@ -124,6 +129,8 @@ async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>>
                         agent_title: agent_title.clone(),
                         agent_home: agent.home().to_path_buf(),
                         provider_name: provider.name,
+                        provider_type: provider_type_label(provider.provider_type),
+                        account: provider_account_label(provider.account.as_ref()),
                         base_url: provider.base_url,
                         enabled: provider.enabled,
                         has_api_key: provider.api_key.is_some(),
@@ -156,6 +163,9 @@ async fn collect_model_catalog_at(home: &Path) -> SentraResult<ModelCatalog> {
                 probe_requests.extend(requests.clone());
             }
             for provider in provider_items(asset.data_async().await?)? {
+                if provider.provider_type != sentra_lib::interfaces::ProviderType::Gateway {
+                    continue;
+                }
                 let base_url = provider.base_url.unwrap_or_default();
                 if base_url.trim().is_empty() {
                     continue;
@@ -250,6 +260,7 @@ fn set_at(
             enabled: true,
         }],
         protocol,
+        ..ProviderData::default()
     };
     mutate_provider_at(home, &agent_name, |asset| {
         asset.set_provider_data(provider.clone())
@@ -276,6 +287,7 @@ fn delete(agent_name: String, base_url: String) -> SentraResult<()> {
         enabled: false,
         models: Vec::new(),
         protocol: None,
+        ..ProviderData::default()
     };
     mutate_provider(&agent_name, |asset| asset.del_provider_data(&provider))?;
     feedback::result(
@@ -337,6 +349,30 @@ fn provider_items(value: serde_json::Value) -> SentraResult<Vec<ProviderData>> {
     serde_json::from_value(value).map_err(|err| SentraError::Message(err.to_string()))
 }
 
+fn provider_type_label(provider_type: sentra_lib::interfaces::ProviderType) -> String {
+    match provider_type {
+        sentra_lib::interfaces::ProviderType::Gateway => "gateway",
+        sentra_lib::interfaces::ProviderType::CodexAccount => "codex_account",
+        sentra_lib::interfaces::ProviderType::ClaudeAccount => "claude_account",
+    }
+    .to_string()
+}
+
+fn provider_account_label(account: Option<&sentra_lib::interfaces::ProviderAccount>) -> String {
+    let Some(account) = account else {
+        return "-".to_string();
+    };
+    account
+        .email
+        .as_deref()
+        .or(account.display_name.as_deref())
+        .or(account.organization_name.as_deref())
+        .or(account.organization_id.as_deref())
+        .or(account.account_id.as_deref())
+        .unwrap_or("-")
+        .to_string()
+}
+
 fn current_home() -> SentraResult<std::path::PathBuf> {
     home::home_dir().ok_or_else(|| {
         SentraError::Message(
@@ -372,6 +408,8 @@ struct ModelRecord {
     agent_title: String,
     agent_home: PathBuf,
     provider_name: String,
+    provider_type: String,
+    account: String,
     #[serde(rename = "baseUrl")]
     base_url: Option<String>,
     enabled: bool,
@@ -1999,6 +2037,8 @@ mod tests {
             agent_title: "Codex".to_string(),
             agent_home: PathBuf::from("/home/codex"),
             provider_name: "gateway.example.test".to_string(),
+            provider_type: "gateway".to_string(),
+            account: "-".to_string(),
             base_url: Some("https://gateway.example.test/api".to_string()),
             enabled: true,
             has_api_key: true,
@@ -2142,10 +2182,7 @@ mod tests {
 
     #[test]
     fn add_gateway_uses_models_from_new_gateway_not_existing_gateway_union() {
-        let server = run_probe_server(
-            200,
-            r#"{"data":[{"id":"fresh-gpt"},{"id":"fresh-mini"}]}"#,
-        );
+        let server = run_probe_server(200, r#"{"data":[{"id":"fresh-gpt"},{"id":"fresh-mini"}]}"#);
         let base_url = server.base_url.clone();
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {

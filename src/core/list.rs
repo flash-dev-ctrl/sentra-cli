@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sentra_lib::interfaces::AssetType;
 use sentra_lib::{SentraError, SentraResult, agents::discover_agents};
@@ -11,15 +11,15 @@ use crate::cli::output::write_output;
 
 pub(crate) async fn run(
     resource: ListResource,
+    home: &Path,
     agent_filter: Option<&str>,
     output: OutputOptions,
 ) -> SentraResult<()> {
-    let home = current_home()?;
     match resource {
-        ListResource::Agent => write_output(agent_records(&home, agent_filter), &output, "Agents"),
+        ListResource::Agent => write_output(agent_records(home, agent_filter), &output, "Agents"),
         ListResource::Asset(asset_type) => {
             let mut assets = Vec::new();
-            for agent in discover_agents(&home) {
+            for agent in discover_agents(home) {
                 if agent_filter.is_some_and(|filter| filter != agent.name()) {
                     continue;
                 }
@@ -45,7 +45,14 @@ pub(crate) async fn run(
     }
 }
 
-fn current_home() -> SentraResult<std::path::PathBuf> {
+pub(crate) fn resolve_home(home: Option<&Path>) -> SentraResult<PathBuf> {
+    match home {
+        Some(home) => Ok(home.to_path_buf()),
+        None => current_home(),
+    }
+}
+
+fn current_home() -> SentraResult<PathBuf> {
     home::home_dir().ok_or_else(|| {
         SentraError::Message(
             t(
@@ -57,7 +64,7 @@ fn current_home() -> SentraResult<std::path::PathBuf> {
     })
 }
 
-fn agent_records(home: &std::path::Path, agent_filter: Option<&str>) -> Vec<AgentRecord> {
+fn agent_records(home: &Path, agent_filter: Option<&str>) -> Vec<AgentRecord> {
     discover_agents(home)
         .into_iter()
         .filter(|agent| agent_filter.is_none_or(|filter| filter == agent.name()))

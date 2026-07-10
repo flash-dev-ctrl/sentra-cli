@@ -27,7 +27,7 @@ pub(crate) fn initialize() -> SentraResult<()> {
     initialize_at(&home)
 }
 
-fn initialize_at(home: &Path) -> SentraResult<()> {
+pub(crate) fn initialize_at(home: &Path) -> SentraResult<()> {
     let sentra_home = sentra_home(home);
     std::fs::create_dir_all(&sentra_home)
         .map_err(|err| SentraError::io(Some(sentra_home.clone()), err))?;

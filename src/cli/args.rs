@@ -11,6 +11,7 @@ use crate::cli::i18n::t;
 #[derive(Debug)]
 pub(crate) enum Command {
     Help,
+    Version,
     ListHelp,
     ScanHelp,
     ImportHelp,
@@ -21,6 +22,7 @@ pub(crate) enum Command {
     UninstallHelp,
     List {
         resource: ListResource,
+        home: Option<PathBuf>,
         agent: Option<String>,
         output: OutputOptions,
     },
@@ -163,6 +165,9 @@ pub(crate) enum UpdateTarget {
 pub(crate) fn parse_args(args: Vec<OsString>) -> SentraResult<Command> {
     if args.is_empty() || is_help(&args[0]) {
         return Ok(Command::Help);
+    }
+    if is_version(&args[0]) {
+        return Ok(Command::Version);
     }
 
     match args[0].to_string_lossy().as_ref() {
@@ -415,10 +420,11 @@ fn parse_list(args: &[OsString]) -> SentraResult<Command> {
         ),
         None => (ListResource::Agent, &args[0..]),
     };
-    let (agent, output) = parse_list_options(options)?;
+    let (home, agent, output) = parse_list_options(options)?;
 
     Ok(Command::List {
         resource,
+        home,
         agent,
         output,
     })
@@ -488,6 +494,15 @@ mod tests {
 
     fn os_args(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn version_flags_print_version() {
+        let short = parse_args(os_args(&["-v"])).unwrap();
+        assert!(matches!(short, Command::Version));
+
+        let long = parse_args(os_args(&["--version"])).unwrap();
+        assert!(matches!(long, Command::Version));
     }
 
     #[test]
@@ -811,13 +826,25 @@ fn parse_output_options(args: &[OsString]) -> SentraResult<OutputOptions> {
     Ok(output)
 }
 
-fn parse_list_options(args: &[OsString]) -> SentraResult<(Option<String>, OutputOptions)> {
+fn parse_list_options(
+    args: &[OsString],
+) -> SentraResult<(Option<PathBuf>, Option<String>, OutputOptions)> {
+    let mut home = None;
     let mut agent = None;
     let mut output = OutputOptions::default();
     let mut index = 0;
     while index < args.len() {
         let option = args[index].to_string_lossy();
         match option.as_ref() {
+            "--home" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(|| {
+                    SentraError::Message(
+                        t("missing value for --home", "缺少 --home 的值").to_string(),
+                    )
+                })?;
+                home = Some(PathBuf::from(value));
+            }
             "--agent" => {
                 index += 1;
                 let value = args.get(index).ok_or_else(|| {
@@ -854,7 +881,7 @@ fn parse_list_options(args: &[OsString]) -> SentraResult<(Option<String>, Output
         }
         index += 1;
     }
-    Ok((agent, output))
+    Ok((home, agent, output))
 }
 
 fn parse_model_set_options(args: &[OsString]) -> SentraResult<ModelAction> {
@@ -1114,7 +1141,8 @@ fn parse_output_format(value: &str) -> SentraResult<OutputFormat> {
 
 pub(crate) fn print_help() {
     println!(
-        "{}",
+        "{}\n{}",
+        version_line(),
         t(
             "\
 Usage:
@@ -1133,6 +1161,7 @@ Commands:
   uninstall  Uninstall an agent CLI
 
 Options:
+  -v, --version   Show version
   -h, --help      Show help
   --lang <en|zh>  Display language
 
@@ -1154,12 +1183,21 @@ Use 'sentra <command> --help' for command-specific usage.",
   uninstall  卸载 Agent CLI
 
 选项:
+  -v, --version   显示版本
   -h, --help      显示帮助
   --lang <en|zh>  显示语言
 
 使用 'sentra <命令> --help' 查看命令帮助。"
         )
     );
+}
+
+pub(crate) fn print_version() {
+    println!("{}", version_line());
+}
+
+fn version_line() -> String {
+    format!("sentra {}", env!("CARGO_PKG_VERSION"))
 }
 
 pub(crate) fn print_install_help() {
@@ -1238,12 +1276,13 @@ pub(crate) fn print_list_help() {
     println!("{}", t(
         "\
 Usage:
-  sentra list <skill|mcp|provider|memory|agent|cron> [--agent <name>] [--format <terminal|json>] [--output <file>]
+  sentra list <skill|mcp|provider|memory|agent|cron> [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
 
 Description:
   List discovered Sentra assets or configured agents.
 
 Options:
+  --home <path>       Read agent homes under this user home
   --agent <name>      Filter assets to an agent
   --format <format>   Output format: terminal, json
   -o, --output <file> Write command output to a file
@@ -1251,16 +1290,17 @@ Options:
 
 Examples:
   sentra list skill
-  sentra list provider --agent codex --format json"
+  sentra list provider --home ./fixtures/provider/account-home --format json"
     ,
         "\
 用法:
-  sentra list <skill|mcp|provider|memory|agent|cron> [--agent <名称>] [--format <terminal|json>] [--output <文件>]
+  sentra list <skill|mcp|provider|memory|agent|cron> [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
 
 说明:
   列出发现的 Sentra 资产或已配置的 Agent。
 
 选项:
+  --home <路径>      从指定用户主目录读取 Agent
   --agent <名称>     按 Agent 过滤资产
   --format <格式>    输出格式: terminal, json
   -o, --output <文件> 将命令输出写入文件
@@ -1268,7 +1308,7 @@ Examples:
 
 示例:
   sentra list skill
-  sentra list provider --agent codex --format json"
+  sentra list provider --home ./fixtures/provider/account-home --format json"
     ));
 }
 
@@ -1502,4 +1542,8 @@ Examples:
 
 fn is_help(arg: &OsString) -> bool {
     matches!(arg.to_string_lossy().as_ref(), "-h" | "--help")
+}
+
+fn is_version(arg: &OsString) -> bool {
+    matches!(arg.to_string_lossy().as_ref(), "-v" | "--version")
 }
