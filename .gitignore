@@ -3,3 +3,4 @@
 /install.cmd
 /openai-codex/
 /rules/yara/chaitin/
+/.cargo-home/
