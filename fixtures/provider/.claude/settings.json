@@ -1,0 +1,7 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://claude-gateway.example.test",
+    "ANTHROPIC_AUTH_TOKEN": "sk-claude-fixture",
+    "ANTHROPIC_MODEL": "claude-fixture-sonnet"
+  }
+}

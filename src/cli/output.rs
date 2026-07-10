@@ -149,6 +149,8 @@ fn format_provider_assets(items: &[serde_json::Value], semantic_symbols: bool) -
             rows.push(vec![
                 agent.clone(),
                 string_field(provider, "name"),
+                string_field(provider, "providerType"),
+                account_label(provider),
                 enabled_label(provider),
                 model_names(provider),
                 string_field(provider, "baseUrl"),
@@ -172,6 +174,8 @@ fn format_provider_assets(items: &[serde_json::Value], semantic_symbols: bool) -
             &[
                 t("AGENT", "AGENT"),
                 t("PROVIDER", "供应商"),
+                t("TYPE", "类型"),
+                t("ACCOUNT", "账户"),
                 t("ENABLED", "启用"),
                 t("MODELS", "模型"),
                 t("BASE URL", "BASE URL"),
@@ -898,6 +902,8 @@ fn format_models(value: &serde_json::Value, semantic_symbols: bool) -> String {
         rows.push(vec![
             string_field(item, "agentName"),
             string_field(item, "providerName"),
+            string_field(item, "providerType"),
+            string_field(item, "account"),
             string_field(item, "model"),
             enabled_label(item),
             string_field(item, "protocol"),
@@ -920,6 +926,8 @@ fn format_models(value: &serde_json::Value, semantic_symbols: bool) -> String {
             &[
                 t("AGENT", "AGENT"),
                 t("PROVIDER", "供应商"),
+                t("TYPE", "类型"),
+                t("ACCOUNT", "账户"),
                 t("MODEL", "模型"),
                 t("ENABLED", "启用"),
                 t("PROTOCOL", "协议"),
@@ -1048,6 +1056,23 @@ fn display_text_field(value: &serde_json::Value, keys: &[&str]) -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("-")
         .to_string()
+}
+
+fn account_label(value: &serde_json::Value) -> String {
+    let Some(account) = value.get("account") else {
+        return "-".to_string();
+    };
+    [
+        "email",
+        "displayName",
+        "organizationName",
+        "organizationId",
+        "accountId",
+    ]
+    .iter()
+    .find_map(|key| account.get(*key).and_then(|value| value.as_str()))
+    .unwrap_or("-")
+    .to_string()
 }
 
 fn enabled_label(value: &serde_json::Value) -> String {

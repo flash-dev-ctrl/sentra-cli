@@ -373,6 +373,7 @@ impl Drop for RawModeGuard {
 fn allows_auto_update_prompt(command: &Command) -> bool {
     match command {
         Command::Help
+        | Command::Version
         | Command::ListHelp
         | Command::ScanHelp
         | Command::ImportHelp
@@ -479,6 +480,7 @@ mod tests {
     fn auto_update_skips_machine_readable_outputs() {
         let command = Command::List {
             resource: ListResource::Agent,
+            home: None,
             agent: None,
             output: OutputOptions {
                 format: OutputFormat::Json,

@@ -1,0 +1,8 @@
+model = "gpt-fixture"
+model_provider = "fixture"
+
+[model_providers.fixture]
+name = "Codex Fixture Gateway"
+base_url = "https://codex-gateway.example.test/v1"
+experimental_bearer_token = "sk-codex-fixture"
+
