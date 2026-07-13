@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::Duration;
 
 const FIXTURE_CODEX_AUTH: &str = include_str!("../fixtures/provider/.codex/auth.json");
 const FIXTURE_CODEX_CONFIG: &str = include_str!("../fixtures/provider/.codex/config.toml");
@@ -35,6 +38,81 @@ fn provider_by_type<'a>(
         .iter()
         .find(|provider| provider["providerType"] == provider_type)
         .unwrap_or_else(|| panic!("missing provider type {provider_type}"))
+}
+
+struct TestHttpServer {
+    base_url: String,
+    rx: Receiver<ObservedHttpRequest>,
+    handle: thread::JoinHandle<()>,
+}
+
+impl TestHttpServer {
+    fn request(self) -> ObservedHttpRequest {
+        let request = self.rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        self.handle.join().unwrap();
+        request
+    }
+}
+
+struct ObservedHttpRequest {
+    path: String,
+    authorization: Option<String>,
+}
+
+fn run_json_server(response_body: &'static str) -> TestHttpServer {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let (tx, rx) = mpsc::channel();
+    let handle = thread::spawn(move || {
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let path = request_line
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or_default()
+            .to_string();
+        let mut authorization = None;
+        let mut content_length = 0usize;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let trimmed = line.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some((key, value)) = trimmed.split_once(':') {
+                if key.trim().eq_ignore_ascii_case("authorization") {
+                    authorization = Some(value.trim().to_string());
+                } else if key.trim().eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+        }
+        let mut request_body = vec![0; content_length];
+        reader.read_exact(&mut request_body).unwrap();
+        tx.send(ObservedHttpRequest {
+            path,
+            authorization,
+        })
+        .unwrap();
+
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        )
+        .unwrap();
+    });
+    TestHttpServer {
+        base_url,
+        rx,
+        handle,
+    }
 }
 
 #[test]
@@ -834,6 +912,68 @@ fn sentra_model_lists_gateway_providers_and_skips_account_type_providers() {
             && model["providerType"] == "gateway"
             && model["model"] == "claude-fixture-sonnet"
     }));
+}
+
+#[test]
+fn sentra_model_fetches_opencode_provider_models_with_runtime_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let server =
+        run_json_server(r#"{"data":[{"id":"fresh-gpt","name":"Fresh GPT"},{"id":"fresh-mini"}]}"#);
+    let home = dir.path().join(".config").join("opencode");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("opencode.json"),
+        format!(
+            r#"{{
+              "model": "chaitin/configured-gpt",
+              "provider": {{
+                "chaitin": {{
+                  "npm": "@ai-sdk/openai-compatible",
+                  "name": "Baizhi Gateway",
+                  "options": {{
+                    "baseURL": "{}",
+                    "apiKey": "sk-opencode-secret"
+                  }},
+                  "models": {{
+                    "configured-gpt": {{"name": "Configured GPT"}}
+                  }}
+                }}
+              }}
+            }}"#,
+            server.base_url
+        ),
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["model", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let request = server.request();
+    assert_eq!(request.path, "/models");
+    assert_eq!(
+        request.authorization.as_deref(),
+        Some("Bearer sk-opencode-secret")
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("sk-opencode-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let models = value.as_array().unwrap();
+    assert!(
+        models
+            .iter()
+            .any(|model| model["model"] == "configured-gpt")
+    );
+    assert!(models.iter().any(|model| model["model"] == "fresh-gpt"));
+    assert!(models.iter().any(|model| model["model"] == "fresh-mini"));
 }
 
 #[test]

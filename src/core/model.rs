@@ -21,7 +21,7 @@ use sentra_lib::agents::discover_agents;
 use sentra_lib::interfaces::{AssetType, ProviderData, ProviderModel, ProviderProbeRequest};
 use sentra_lib::protocol::{
     ModelRequestParams, WireProtocol, probe_model_request, probe_model_request_with_prompt,
-    validate_model_probe_response,
+    validate_model_text_response,
 };
 use sentra_lib::{SentraError, SentraResult};
 use serde::Serialize;
@@ -104,36 +104,61 @@ async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>>
     for agent in discover_agents(home) {
         let agent_title = agent.title().to_string();
         for asset in agent.get_assets(AssetType::Provider)? {
-            for provider in provider_items(asset.data_async().await?)? {
+            for provider in provider_items(asset.runtime_data_async().await?)? {
                 if provider.provider_type != sentra_lib::interfaces::ProviderType::Gateway {
                     continue;
                 }
-                for model in provider.models.iter().filter(|model| model.enabled) {
+                let provider_type = provider_type_label(provider.provider_type);
+                let account = provider_account_label(provider.account.as_ref());
+                let base_url = provider.base_url.clone();
+                let has_api_key = provider.api_key.is_some();
+                let mut provider_record = ProviderRecord {
+                    name: provider.name.clone(),
+                    base_url: provider.base_url.clone().unwrap_or_default(),
+                    api_key: provider.api_key.clone(),
+                    enabled: provider.enabled,
+                    models: provider
+                        .models
+                        .iter()
+                        .filter(|model| model.enabled)
+                        .map(|model| ModelChoice {
+                            id: model.id.clone(),
+                            name: model.name.clone().unwrap_or_else(|| model.id.clone()),
+                            enabled: model.enabled,
+                            status: ModelProbeStatus::Testing,
+                            protocol: provider.protocol,
+                        })
+                        .collect(),
+                    temporary: false,
+                };
+                merge_fetched_models(&mut provider_record);
+
+                for model in provider_record.models.iter().filter(|model| model.enabled) {
                     records.push(ModelRecord {
                         agent_name: agent.name().to_string(),
                         agent_title: agent_title.clone(),
                         agent_home: agent.home().to_path_buf(),
                         provider_name: provider.name.clone(),
-                        provider_type: provider_type_label(provider.provider_type),
-                        account: provider_account_label(provider.account.as_ref()),
-                        base_url: provider.base_url.clone(),
+                        provider_type: provider_type.clone(),
+                        account: account.clone(),
+                        base_url: base_url.clone(),
                         enabled: provider.enabled,
-                        has_api_key: provider.api_key.is_some(),
+                        has_api_key,
                         model: model.id.clone(),
-                        protocol: provider.protocol.map(|protocol| protocol.to_string()),
+                        protocol: model.protocol.map(|protocol| protocol.to_string()),
                     });
                 }
-                if provider.models.is_empty() {
+                if provider_record.models.is_empty() {
                     records.push(ModelRecord {
                         agent_name: agent.name().to_string(),
                         agent_title: agent_title.clone(),
                         agent_home: agent.home().to_path_buf(),
                         provider_name: provider.name,
-                        provider_type: provider_type_label(provider.provider_type),
-                        account: provider_account_label(provider.account.as_ref()),
-                        base_url: provider.base_url,
+                        provider_type,
+                        account,
+                        base_url,
                         enabled: provider.enabled,
-                        has_api_key: provider.api_key.is_some(),
+                        has_api_key,
                         model: "-".to_string(),
                         protocol: provider.protocol.map(|protocol| protocol.to_string()),
                     });
@@ -162,7 +187,7 @@ async fn collect_model_catalog_at(home: &Path) -> SentraResult<ModelCatalog> {
             if !requests.is_empty() {
                 probe_requests.extend(requests.clone());
             }
-            for provider in provider_items(asset.data_async().await?)? {
+            for provider in provider_items(asset.runtime_data_async().await?)? {
                 if provider.provider_type != sentra_lib::interfaces::ProviderType::Gateway {
                     continue;
                 }
@@ -652,7 +677,11 @@ fn probe_provider_model_with_body(
         provider.base_url.trim_end_matches('/'),
         probe_endpoint_path(protocol)
     );
-    let response = ureq::post(&url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_millis(15_000))
+        .build();
+    let response = agent
+        .post(&url)
         .set("Authorization", &format!("Bearer {api_key}"))
         .set("Content-Type", "application/json")
         .send_string(body);
@@ -662,7 +691,7 @@ fn probe_provider_model_with_body(
     let Ok(raw) = response.into_string() else {
         return false;
     };
-    validate_model_probe_response(protocol, &raw).is_ok()
+    validate_model_text_response(protocol, &raw).is_ok()
 }
 
 fn probe_endpoint_path(protocol: WireProtocol) -> &'static str {
@@ -678,13 +707,17 @@ fn merge_fetched_models(provider: &mut ProviderRecord) {
     if fetched.is_empty() {
         return;
     }
+    let fallback_protocol = provider.models.iter().find_map(|model| model.protocol);
     let mut seen = provider
         .models
         .iter()
         .map(|model| model.id.clone())
         .collect::<BTreeSet<_>>();
-    for model in fetched {
+    for mut model in fetched {
         if seen.insert(model.id.clone()) {
+            if model.protocol.is_none() {
+                model.protocol = fallback_protocol;
+            }
             provider.models.push(model);
         }
     }
@@ -698,6 +731,7 @@ fn fetch_gateway_models(provider: &ProviderRecord) -> Vec<ModelChoice> {
         .api_key
         .as_deref()
         .filter(|value| !value.trim().is_empty())
+        .filter(|value| !is_masked_secret(value))
     else {
         return Vec::new();
     };
@@ -705,7 +739,11 @@ fn fetch_gateway_models(provider: &ProviderRecord) -> Vec<ModelChoice> {
         return Vec::new();
     }
     let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
-    let response = ureq::get(&url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(2))
+        .build();
+    let response = agent
+        .get(&url)
         .set("Authorization", &format!("Bearer {api_key}"))
         .call();
     let Ok(response) = response else {
@@ -718,6 +756,10 @@ fn fetch_gateway_models(provider: &ProviderRecord) -> Vec<ModelChoice> {
         return Vec::new();
     };
     parse_model_list(&value)
+}
+
+fn is_masked_secret(value: &str) -> bool {
+    value.contains("****")
 }
 
 fn parse_model_list(value: &serde_json::Value) -> Vec<ModelChoice> {
@@ -2539,6 +2581,38 @@ mod tests {
 
         let observed = server.request();
         assert_eq!(observed.path, "/responses");
+        assert_eq!(observed.body["model"], "gpt-5");
+    }
+
+    #[test]
+    fn probe_provider_model_accepts_custom_title_response_text() {
+        let server = run_probe_server(
+            200,
+            r#"{"choices":[{"message":{"content":"Quick check-in"}}]}"#,
+        );
+        let provider = ProviderRecord {
+            name: "test".to_string(),
+            base_url: server.base_url.clone(),
+            api_key: Some("sk-test".to_string()),
+            enabled: true,
+            models: Vec::new(),
+            temporary: false,
+        };
+        let request = ProviderProbeRequest {
+            protocol: WireProtocol::ChatCompletions,
+            body: Some(r#"{"model":"gpt-5","messages":[]}"#.to_string()),
+            prompt: None,
+        };
+
+        assert!(probe_provider_model(
+            &provider,
+            "sk-test",
+            "ignored-model",
+            &request
+        ));
+
+        let observed = server.request();
+        assert_eq!(observed.path, "/chat/completions");
         assert_eq!(observed.body["model"], "gpt-5");
     }
 
