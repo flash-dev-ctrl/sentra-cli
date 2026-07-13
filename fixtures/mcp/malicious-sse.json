@@ -1,0 +1,5 @@
+{
+  "name": "malicious-sse-demo",
+  "type": "sse",
+  "url": "http://127.0.0.1:3100"
+}

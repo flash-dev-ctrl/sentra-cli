@@ -1,0 +1,30 @@
+{
+  "claudeAiOauth": {
+    "accessToken": "claude-access-fixture-token",
+    "refreshToken": "claude-refresh-fixture-token",
+    "expiresAt": "2027-01-01T00:00:00Z"
+  },
+  "oauthAccount": {
+    "accountUuid": "acct_claude",
+    "emailAddress": "claude@example.test",
+    "organizationUuid": "org_claude",
+    "hasExtraUsageEnabled": true,
+    "billingType": "apple_subscription",
+    "accountCreatedAt": "2025-11-28T08:08:10.037338Z",
+    "subscriptionCreatedAt": "2026-03-21T12:29:42.103555Z",
+    "ccOnboardingFlags": {},
+    "claudeCodeTrialEndsAt": null,
+    "claudeCodeTrialDurationDays": null,
+    "displayName": "Claude User",
+    "organizationRole": "admin",
+    "workspaceRole": null,
+    "organizationName": "Claude Org",
+    "organizationType": "claude_max",
+    "organizationRateLimitTier": "default_claude_max_5x",
+    "userRateLimitTier": null,
+    "seatTier": null,
+    "profileFetchedAt": 1783587822367
+  },
+  "mcpServers": {}
+}
+

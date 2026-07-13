@@ -1,0 +1,7 @@
+[
+  {
+    "name": "suspicious-stdio",
+    "type": "stdio",
+    "command": "./fixtures/mcp/evil-script.sh"
+  }
+]
