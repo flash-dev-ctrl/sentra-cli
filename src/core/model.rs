@@ -56,12 +56,16 @@ async fn interactive() -> SentraResult<()> {
     let catalog = collect_model_catalog().await?;
     let submitted = run_model_tui(&records, catalog)?;
     if let Some(input) = submitted {
-        set(
+        let home = current_home()?;
+        set_at(
+            &home,
             input.agent,
             input.base_url,
             input.api_key,
             input.model,
             input.protocol,
+            input.provider_name,
+            input.raw_provider_id,
         )?;
     }
     Ok(())
@@ -84,6 +88,8 @@ pub(crate) async fn configure_sentra_model_from_all_gateways_at(home: &Path) -> 
             input.api_key,
             input.model,
             input.protocol,
+            None,
+            None,
         )?;
         return Ok(true);
     }
@@ -112,8 +118,10 @@ async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>>
                 let account = provider_account_label(provider.account.as_ref());
                 let base_url = provider.base_url.clone();
                 let has_api_key = provider.api_key.is_some();
+                let raw_provider_id = provider.raw_provider_id.clone().or(provider.provider_id);
                 let mut provider_record = ProviderRecord {
                     name: provider.name.clone(),
+                    raw_provider_id,
                     base_url: provider.base_url.clone().unwrap_or_default(),
                     api_key: provider.api_key.clone(),
                     enabled: provider.enabled,
@@ -195,6 +203,7 @@ async fn collect_model_catalog_at(home: &Path) -> SentraResult<ModelCatalog> {
                 if base_url.trim().is_empty() {
                     continue;
                 }
+                let raw_provider_id = provider.raw_provider_id.clone().or(provider.provider_id);
                 let gateway_key = provider_key(&base_url, provider.api_key.as_deref());
                 if !seen_gateways.insert(gateway_key) {
                     continue;
@@ -213,6 +222,7 @@ async fn collect_model_catalog_at(home: &Path) -> SentraResult<ModelCatalog> {
                     .collect::<Vec<_>>();
                 let mut provider_record = ProviderRecord {
                     name: provider.name,
+                    raw_provider_id,
                     base_url: base_url.clone(),
                     api_key: provider.api_key,
                     enabled: provider.enabled,
@@ -258,7 +268,9 @@ fn set(
     protocol: Option<sentra_lib::protocol::WireProtocol>,
 ) -> SentraResult<()> {
     let home = current_home()?;
-    set_at(&home, agent_name, base_url, api_key, model, protocol)
+    set_at(
+        &home, agent_name, base_url, api_key, model, protocol, None, None,
+    )
 }
 
 fn set_at(
@@ -268,14 +280,20 @@ fn set_at(
     api_key: String,
     model: String,
     protocol: Option<sentra_lib::protocol::WireProtocol>,
+    provider_name_override: Option<String>,
+    raw_provider_id: Option<String>,
 ) -> SentraResult<()> {
     let base_url_display = base_url.clone();
     let model_display = model.clone();
     let protocol_display = protocol
         .map(|protocol| protocol.to_string())
         .unwrap_or_else(|| "-".to_string());
+    let provider_name = provider_name_override
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| provider_name(&base_url));
     let provider = ProviderData {
-        name: provider_name(&base_url),
+        name: provider_name,
+        raw_provider_id,
         base_url: Some(base_url),
         api_key: Some(api_key),
         enabled: true,
@@ -446,6 +464,8 @@ struct ModelRecord {
 #[derive(Debug, PartialEq, Eq)]
 struct ModelConfigInput {
     agent: String,
+    provider_name: Option<String>,
+    raw_provider_id: Option<String>,
     base_url: String,
     api_key: String,
     model: String,
@@ -468,6 +488,7 @@ struct AgentProviderEntry {
 #[derive(Debug, Clone)]
 struct ProviderRecord {
     name: String,
+    raw_provider_id: Option<String>,
     base_url: String,
     api_key: Option<String>,
     enabled: bool,
@@ -1789,6 +1810,7 @@ impl ModelTuiState {
         }
         let mut provider = ProviderRecord {
             name: provider_name(base_url.trim()),
+            raw_provider_id: None,
             base_url: base_url.trim().to_string(),
             api_key: Some(api_key.trim().to_string()),
             enabled: true,
@@ -1926,6 +1948,8 @@ impl ModelTuiState {
         }
         Some(ModelConfigInput {
             agent: agent.agent_name.clone(),
+            provider_name: Some(provider.name.clone()),
+            raw_provider_id: provider.raw_provider_id.clone(),
             base_url: provider.base_url.clone(),
             api_key,
             model: model.id.clone(),
@@ -2183,6 +2207,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: Some("sk-test".to_string()),
                 enabled: true,
@@ -2234,6 +2259,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "existing".to_string(),
+                raw_provider_id: None,
                 base_url: "https://existing.example.test/api".to_string(),
                 api_key: Some("sk-existing".to_string()),
                 enabled: true,
@@ -2281,6 +2307,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: Some("gateway-id".to_string()),
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: Some("sk-test".to_string()),
                 enabled: true,
@@ -2304,6 +2331,8 @@ mod tests {
             state.submit_selected_model(),
             Some(ModelConfigInput {
                 agent: "codex".to_string(),
+                provider_name: Some("gateway".to_string()),
+                raw_provider_id: Some("gateway-id".to_string()),
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: "sk-test".to_string(),
                 model: "gpt-test".to_string(),
@@ -2329,6 +2358,7 @@ mod tests {
             ],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: Some("sk-test".to_string()),
                 enabled: true,
@@ -2360,6 +2390,7 @@ mod tests {
             gateways: vec![
                 ProviderRecord {
                     name: "codex-gateway".to_string(),
+                    raw_provider_id: None,
                     base_url: "https://codex.example.test/api/openai".to_string(),
                     api_key: Some("sk-codex".to_string()),
                     enabled: true,
@@ -2368,6 +2399,7 @@ mod tests {
                 },
                 ProviderRecord {
                     name: "sentra-gateway".to_string(),
+                    raw_provider_id: None,
                     base_url: "https://sentra.example.test/api/openai".to_string(),
                     api_key: Some("sk-sentra".to_string()),
                     enabled: true,
@@ -2456,6 +2488,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://ai-api-gateway.app.baizhi.cloud/api/openai".to_string(),
                 api_key: Some("sk-1234567890".to_string()),
                 enabled: true,
@@ -2481,6 +2514,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://ai-api-gateway.app.baizhi.cloud/api/openai".to_string(),
                 api_key: Some("sk-1234567890".to_string()),
                 enabled: true,
@@ -2560,6 +2594,7 @@ mod tests {
         );
         let provider = ProviderRecord {
             name: "test".to_string(),
+            raw_provider_id: None,
             base_url: server.base_url.clone(),
             api_key: Some("sk-test".to_string()),
             enabled: true,
@@ -2592,6 +2627,7 @@ mod tests {
         );
         let provider = ProviderRecord {
             name: "test".to_string(),
+            raw_provider_id: None,
             base_url: server.base_url.clone(),
             api_key: Some("sk-test".to_string()),
             enabled: true,
@@ -2691,6 +2727,7 @@ mod tests {
             ],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: Some("sk-test".to_string()),
                 enabled: true,
@@ -2740,6 +2777,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: Some("sk-test".to_string()),
                 enabled: true,
@@ -2774,6 +2812,7 @@ mod tests {
             }],
             gateways: vec![ProviderRecord {
                 name: "gateway".to_string(),
+                raw_provider_id: None,
                 base_url: "https://gateway.example.test/api".to_string(),
                 api_key: Some("sk-test".to_string()),
                 enabled: true,

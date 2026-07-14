@@ -168,6 +168,6 @@ async fn execute(command: &Command) -> SentraResult<()> {
             skill::list().await
         }
         Command::Install { agent } => install::run(agent.clone()),
-        Command::Uninstall { agent } => install::run_uninstall(agent.clone()),
+        Command::Uninstall { agent, force } => install::run_uninstall(agent.clone(), *force),
     }
 }

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.4
+
+- Added Agent installation status display and configurable install/uninstall flows.
+- Added uninstall confirmation for configuration data cleanup.
+- Synced the bundled Sentra library changes from the rs branch.
+- Documented local Cargo cache isolation for repository collaboration.
+
 ## 0.2.1
 
 - Added pre-command self-update prompts for outdated Sentra CLI installs.

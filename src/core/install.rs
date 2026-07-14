@@ -1,7 +1,9 @@
 #[cfg(test)]
 use sentra_lib::interfaces::AgentInstallResult;
+use sentra_lib::interfaces::AgentUninstallOptions;
 use sentra_lib::interfaces::{AgentInstallAction, AgentInstallProgress, AgentInstallProgressStage};
 use sentra_lib::{SentraResult, agents};
+use std::io::{self, IsTerminal, Write};
 
 use crate::cli::feedback::{self, Status};
 use crate::cli::i18n::t;
@@ -22,20 +24,77 @@ pub(crate) fn run(agent: String) -> SentraResult<()> {
     Ok(())
 }
 
-pub(crate) fn run_uninstall(agent: String) -> SentraResult<()> {
+pub(crate) fn run_uninstall(agent: String, force: bool) -> SentraResult<()> {
     feedback::context(
         t("Uninstall agent", "卸载 Agent"),
         &[(t("Agent", "Agent"), agent.clone())],
     );
-    let result = agents::uninstall_agent_with_progress(&agent, |progress| {
-        eprintln!("{}", render_install_progress(&progress));
-    })?;
+    let delete_config = force || confirm_delete_config(&agent)?;
+    feedback::phase(
+        if delete_config {
+            Status::Warning
+        } else {
+            Status::Info
+        },
+        if delete_config {
+            t("Configuration data will be deleted.", "将删除配置数据。")
+        } else {
+            t("Configuration data will be kept.", "将保留配置数据。")
+        },
+    );
+    let result = agents::uninstall_agent_with_options_and_progress(
+        &agent,
+        AgentUninstallOptions { delete_config },
+        |progress| {
+            eprintln!("{}", render_install_progress(&progress));
+        },
+    )?;
     feedback::result(
         Status::Success,
         t("Agent uninstalled", "Agent 已卸载"),
         &[(t("Name", "名称"), result.agent.clone())],
     );
     Ok(())
+}
+
+fn confirm_delete_config(agent: &str) -> SentraResult<bool> {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        feedback::phase(
+            Status::Info,
+            t(
+                "Non-interactive input detected; configuration data will be kept. Use --force to delete it.",
+                "检测到非交互输入；将保留配置数据。如需删除，请使用 --force。",
+            ),
+        );
+        return Ok(false);
+    }
+
+    feedback::phase(
+        Status::Warning,
+        t(
+            "Uninstall will remove the agent program. You can choose whether to delete configuration data.",
+            "卸载会移除 Agent 程序。你可以选择是否删除配置数据。",
+        ),
+    );
+    let prompt = t(
+        "Delete configuration data for {agent}? Type y to delete, n to keep [y/N]:",
+        "是否删除 {agent} 的配置数据？输入 y 删除，输入 n 保留 [y/N]:",
+    )
+    .replace("{agent}", agent);
+    eprint!("  {} ", prompt,);
+    io::stderr()
+        .flush()
+        .map_err(|err| sentra_lib::SentraError::io(None, err))?;
+
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|err| sentra_lib::SentraError::io(None, err))?;
+    Ok(is_delete_config_confirmation_yes(&answer))
+}
+
+fn is_delete_config_confirmation_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn install_result_title(action: AgentInstallAction) -> &'static str {
@@ -99,7 +158,10 @@ mod tests {
             stderr: String::new(),
         });
 
-        assert!(rendered.starts_with("Uninstalled claude-cli"));
+        assert!(
+            rendered.starts_with("Uninstalled claude-cli")
+                || rendered.starts_with("已卸载 claude-cli")
+        );
         assert!(!rendered.contains("command:"));
     }
 
@@ -138,5 +200,14 @@ mod tests {
             install_result_title(AgentInstallAction::Update),
             "Agent updated"
         );
+    }
+
+    #[test]
+    fn delete_config_confirmation_requires_explicit_yes() {
+        assert!(is_delete_config_confirmation_yes("y"));
+        assert!(is_delete_config_confirmation_yes("YES\n"));
+        assert!(!is_delete_config_confirmation_yes(""));
+        assert!(!is_delete_config_confirmation_yes("n"));
+        assert!(!is_delete_config_confirmation_yes("codex"));
     }
 }
