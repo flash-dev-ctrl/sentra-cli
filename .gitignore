@@ -2,4 +2,4 @@
 /dist
 /install.cmd
 /openai-codex/
-/.cargo-home/
+.cargo-home/
