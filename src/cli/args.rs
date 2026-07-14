@@ -61,6 +61,7 @@ pub(crate) enum Command {
     },
     Uninstall {
         agent: String,
+        force: bool,
     },
 }
 
@@ -207,7 +208,7 @@ fn parse_install(args: &[OsString]) -> SentraResult<Command> {
         )));
     }
     match agent.as_str() {
-        "codex" | "claude" | "opencode" => Ok(Command::Install { agent }),
+        "codex" | "claude" | "opencode" | "pi" => Ok(Command::Install { agent }),
         other => Err(SentraError::Message(format!(
             "{}: {other}",
             t("unsupported install agent", "不支持的安装目标")
@@ -216,25 +217,35 @@ fn parse_install(args: &[OsString]) -> SentraResult<Command> {
 }
 
 fn parse_uninstall(args: &[OsString]) -> SentraResult<Command> {
-    if args.first().is_some_and(is_help) || args.iter().skip(1).any(is_help) {
+    if args.iter().any(is_help) {
         return Ok(Command::UninstallHelp);
     }
-    let agent = args
-        .first()
-        .ok_or_else(|| {
-            SentraError::Message(t("missing uninstall agent", "缺少卸载目标").to_string())
-        })?
-        .to_string_lossy()
-        .to_string();
-    if args.len() > 1 {
-        return Err(SentraError::Message(format!(
-            "{}: {}",
-            t("unknown uninstall argument", "未知卸载参数"),
-            args[1].to_string_lossy()
-        )));
+    let mut agent = None;
+    let mut force = false;
+    for arg in args {
+        let value = arg.to_string_lossy();
+        match value.as_ref() {
+            "-f" | "--force" => force = true,
+            value if value.starts_with('-') => {
+                return Err(SentraError::Message(format!(
+                    "{}: {value}",
+                    t("unknown uninstall argument", "未知卸载参数")
+                )));
+            }
+            value if agent.is_none() => agent = Some(value.to_string()),
+            value => {
+                return Err(SentraError::Message(format!(
+                    "{}: {value}",
+                    t("unknown uninstall argument", "未知卸载参数")
+                )));
+            }
+        }
     }
+    let agent = agent.ok_or_else(|| {
+        SentraError::Message(t("missing uninstall agent", "缺少卸载目标").to_string())
+    })?;
     match agent.as_str() {
-        "codex" | "claude" | "opencode" => Ok(Command::Uninstall { agent }),
+        "codex" | "claude" | "opencode" | "pi" => Ok(Command::Uninstall { agent, force }),
         other => Err(SentraError::Message(format!(
             "{}: {other}",
             t("unsupported uninstall agent", "不支持的卸载目标")
@@ -569,6 +580,9 @@ mod tests {
 
         let opencode = parse_args(os_args(&["install", "opencode"])).unwrap();
         assert!(matches!(opencode, Command::Install { agent } if agent == "opencode"));
+
+        let pi = parse_args(os_args(&["install", "pi"])).unwrap();
+        assert!(matches!(pi, Command::Install { agent } if agent == "pi"));
     }
 
     #[test]
@@ -581,20 +595,35 @@ mod tests {
     #[test]
     fn uninstall_command_accepts_supported_agents() {
         let codex = parse_args(os_args(&["uninstall", "codex"])).unwrap();
-        assert!(matches!(codex, Command::Uninstall { agent } if agent == "codex"));
+        assert!(matches!(codex, Command::Uninstall { agent, force: false } if agent == "codex"));
 
         let claude = parse_args(os_args(&["uninstall", "claude"])).unwrap();
-        assert!(matches!(claude, Command::Uninstall { agent } if agent == "claude"));
+        assert!(matches!(claude, Command::Uninstall { agent, force: false } if agent == "claude"));
 
         let opencode = parse_args(os_args(&["uninstall", "opencode"])).unwrap();
-        assert!(matches!(opencode, Command::Uninstall { agent } if agent == "opencode"));
+        assert!(
+            matches!(opencode, Command::Uninstall { agent, force: false } if agent == "opencode")
+        );
+
+        let pi = parse_args(os_args(&["uninstall", "pi"])).unwrap();
+        assert!(matches!(pi, Command::Uninstall { agent, force: false } if agent == "pi"));
+    }
+
+    #[test]
+    fn uninstall_command_accepts_force_flag() {
+        let long = parse_args(os_args(&["uninstall", "codex", "--force"])).unwrap();
+        assert!(matches!(long, Command::Uninstall { agent, force: true } if agent == "codex"));
+
+        let short = parse_args(os_args(&["uninstall", "-f", "opencode"])).unwrap();
+        assert!(matches!(short, Command::Uninstall { agent, force: true } if agent == "opencode"));
     }
 
     #[test]
     fn uninstall_command_rejects_unsupported_agents() {
         let err = parse_args(os_args(&["uninstall", "gemini"])).unwrap_err();
 
-        assert!(err.to_string().contains("unsupported uninstall agent"));
+        let err = err.to_string();
+        assert!(err.contains("unsupported uninstall agent") || err.contains("不支持的卸载目标"));
     }
 
     #[test]
@@ -1206,7 +1235,7 @@ pub(crate) fn print_install_help() {
         t(
             "\
 Usage:
-  sentra install <codex|claude|opencode>
+  sentra install <codex|claude|opencode|pi>
 
 Description:
   Install an agent CLI. If it is already installed, update it.
@@ -1217,10 +1246,11 @@ Options:
 Examples:
   sentra install codex
   sentra install claude
-  sentra install opencode",
+  sentra install opencode
+  sentra install pi",
             "\
 用法:
-  sentra install <codex|claude|opencode>
+  sentra install <codex|claude|opencode|pi>
 
 说明:
   安装 Agent CLI；如果已经安装则更新。
@@ -1231,7 +1261,8 @@ Examples:
 示例:
   sentra install codex
   sentra install claude
-  sentra install opencode"
+  sentra install opencode
+  sentra install pi"
         )
     );
 }
@@ -1242,32 +1273,36 @@ pub(crate) fn print_uninstall_help() {
         t(
             "\
 Usage:
-  sentra uninstall <codex|claude|opencode>
+  sentra uninstall <codex|claude|opencode|pi> [--force]
 
 Description:
-  Uninstall an agent CLI without removing user data.
+  Uninstall an agent CLI. By default, Sentra asks whether to delete local configuration data.
 
 Options:
-  -h, --help  Show help
+  -f, --force  Delete configuration data without asking
+  -h, --help   Show help
 
 Examples:
   sentra uninstall codex
   sentra uninstall claude
-  sentra uninstall opencode",
+  sentra uninstall opencode --force
+  sentra uninstall pi",
             "\
 用法:
-  sentra uninstall <codex|claude|opencode>
+  sentra uninstall <codex|claude|opencode|pi> [--force]
 
 说明:
-  卸载 Agent CLI，但不删除用户数据。
+  卸载 Agent CLI。默认会询问是否删除本地配置数据。
 
 选项:
-  -h, --help  显示帮助
+  -f, --force  不询问并直接删除配置数据
+  -h, --help   显示帮助
 
 示例:
   sentra uninstall codex
   sentra uninstall claude
-  sentra uninstall opencode"
+  sentra uninstall opencode --force
+  sentra uninstall pi"
         )
     );
 }
