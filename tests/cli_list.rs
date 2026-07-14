@@ -182,6 +182,7 @@ fn sentra_version_flags_print_version() {
 fn sentra_list_agent_outputs_discovered_agents_as_json() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".codex")).unwrap();
+    write_agent_binary(dir.path(), "codex");
 
     let output = sentra_command()
         .args(["list", "agent", "--format", "json"])
@@ -202,6 +203,11 @@ fn sentra_list_agent_outputs_discovered_agents_as_json() {
     assert!(agents.iter().any(|agent| agent["name"] == "codex"));
     assert!(agents.iter().any(|agent| agent["name"] == "sentra"));
     assert!(agents.iter().any(|agent| agent["title"] == "Codex"));
+    let codex = agents
+        .iter()
+        .find(|agent| agent["name"] == "codex")
+        .unwrap();
+    assert_eq!(codex["installed"], true);
 }
 
 #[test]
@@ -243,9 +249,11 @@ fn sentra_list_writes_json_to_output_file() {
 fn sentra_list_defaults_to_terminal_format() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".codex")).unwrap();
+    write_agent_binary(dir.path(), "codex");
 
     let output = sentra_command()
         .args(["list", "agent"])
+        .env("SENTRA_LANG", "en")
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .output()
@@ -259,6 +267,8 @@ fn sentra_list_defaults_to_terminal_format() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Agents"));
     assert!(stdout.contains("codex"));
+    assert!(stdout.contains("INSTALLED"));
+    assert!(stdout.contains("yes"));
     assert!(serde_json::from_slice::<serde_json::Value>(&output.stdout).is_err());
 }
 
@@ -2235,4 +2245,18 @@ fn contains_file(dir: &std::path::Path) -> bool {
 
 fn sentra_command() -> Command {
     Command::new(std::env::var("CARGO_BIN_EXE_sentra").unwrap())
+}
+
+fn write_agent_binary(home: &Path, name: &str) {
+    let bin_dir = home.join(".local").join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::write(bin_dir.join(test_binary_name(name)), "").unwrap();
+}
+
+fn test_binary_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    }
 }

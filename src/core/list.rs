@@ -1,7 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use sentra_lib::interfaces::AssetType;
-use sentra_lib::{SentraError, SentraResult, agents::discover_agents};
+use sentra_lib::{
+    SentraError, SentraResult,
+    agents::{Agent, discover_agents},
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -16,7 +19,7 @@ pub(crate) async fn run(
     output: OutputOptions,
 ) -> SentraResult<()> {
     match resource {
-        ListResource::Agent => write_output(agent_records(home, agent_filter), &output, "Agents"),
+        ListResource::Agent => write_output(agent_records(home, agent_filter)?, &output, "Agents"),
         ListResource::Asset(asset_type) => {
             let mut assets = Vec::new();
             for agent in discover_agents(home) {
@@ -64,16 +67,30 @@ fn current_home() -> SentraResult<PathBuf> {
     })
 }
 
-fn agent_records(home: &Path, agent_filter: Option<&str>) -> Vec<AgentRecord> {
-    discover_agents(home)
+fn agent_records(home: &Path, agent_filter: Option<&str>) -> SentraResult<Vec<AgentRecord>> {
+    let mut records = Vec::new();
+    for agent in discover_agents(home)
         .into_iter()
         .filter(|agent| agent_filter.is_none_or(|filter| filter == agent.name()))
-        .map(|agent| AgentRecord {
+    {
+        records.push(AgentRecord {
             name: agent.name().to_string(),
             title: agent.title().to_string(),
+            installed: agent_installed(&agent)?,
             home: agent.home().to_path_buf(),
-        })
-        .collect()
+        });
+    }
+    Ok(records)
+}
+
+fn agent_installed(agent: &Agent) -> SentraResult<bool> {
+    for asset in agent.get_assets(AssetType::Meta)? {
+        let data = asset.data()?;
+        if let Some(installed) = data.get("installed").and_then(|value| value.as_bool()) {
+            return Ok(installed);
+        }
+    }
+    Ok(false)
 }
 
 #[derive(Debug, Serialize)]
@@ -81,6 +98,7 @@ fn agent_records(home: &Path, agent_filter: Option<&str>) -> Vec<AgentRecord> {
 struct AgentRecord {
     name: String,
     title: String,
+    installed: bool,
     home: PathBuf,
 }
 

@@ -85,6 +85,7 @@ fn format_agents(value: &serde_json::Value, semantic_symbols: bool) -> String {
         rows.push(vec![
             string_field(item, "name"),
             string_field(item, "title"),
+            bool_label(item, "installed"),
             string_field(item, "home"),
         ]);
     }
@@ -102,7 +103,12 @@ fn format_agents(value: &serde_json::Value, semantic_symbols: bool) -> String {
         ),
         format_table(
             &format!("{} ({})", t("Agents", "Agent"), rows.len()),
-            &[t("NAME", "名称"), t("TITLE", "标题"), t("HOME", "目录")],
+            &[
+                t("NAME", "名称"),
+                t("TITLE", "标题"),
+                t("INSTALLED", "已安装"),
+                t("HOME", "目录"),
+            ],
             rows,
             semantic_symbols,
         ),
@@ -1076,7 +1082,11 @@ fn account_label(value: &serde_json::Value) -> String {
 }
 
 fn enabled_label(value: &serde_json::Value) -> String {
-    match value.get("enabled").and_then(|value| value.as_bool()) {
+    bool_label(value, "enabled")
+}
+
+fn bool_label(value: &serde_json::Value, key: &str) -> String {
+    match value.get(key).and_then(|value| value.as_bool()) {
         Some(value) => yes_no(value).to_string(),
         None => "-".to_string(),
     }
