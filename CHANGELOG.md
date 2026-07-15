@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.5
+
+- Added installed-agent discovery when an agent home has not been initialized yet.
+- Added Codex desktop app detection alongside Codex CLI detection.
+- Updated agent list tests to tolerate additional installed agents discovered in CI.
+
 ## 0.2.4
 
 - Added Agent installation status display and configurable install/uninstall flows.
