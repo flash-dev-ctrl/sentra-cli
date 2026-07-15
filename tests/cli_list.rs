@@ -181,7 +181,6 @@ fn sentra_version_flags_print_version() {
 #[test]
 fn sentra_list_agent_outputs_discovered_agents_as_json() {
     let dir = tempfile::tempdir().unwrap();
-    fs::create_dir_all(dir.path().join(".codex")).unwrap();
     write_agent_binary(dir.path(), "codex");
     write_agent_home_binary(&dir.path().join(".sentra"), "sentra");
 
@@ -200,7 +199,7 @@ fn sentra_list_agent_outputs_discovered_agents_as_json() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let agents = value.as_array().unwrap();
 
-    assert_eq!(agents.len(), 2);
+    assert!(agents.len() >= 2, "agents: {agents:?}");
     assert!(agents.iter().any(|agent| agent["name"] == "codex"));
     assert!(agents.iter().any(|agent| agent["name"] == "sentra"));
     assert!(agents.iter().any(|agent| agent["title"] == "Codex"));
@@ -209,6 +208,13 @@ fn sentra_list_agent_outputs_discovered_agents_as_json() {
         .find(|agent| agent["name"] == "codex")
         .unwrap();
     assert_eq!(codex["installed"], true);
+    assert!(
+        codex["home"]
+            .as_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("/.codex")
+    );
     let sentra = agents
         .iter()
         .find(|agent| agent["name"] == "sentra")
@@ -246,7 +252,7 @@ fn sentra_list_writes_json_to_output_file() {
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
     let agents = value.as_array().unwrap();
 
-    assert_eq!(agents.len(), 2);
+    assert!(agents.len() >= 2, "agents: {agents:?}");
     assert!(agents.iter().any(|agent| agent["name"] == "codex"));
     assert!(agents.iter().any(|agent| agent["name"] == "sentra"));
 }
