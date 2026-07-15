@@ -799,6 +799,7 @@ fn parse_list_resource(resource: &str) -> SentraResult<ListResource> {
         "provider" => Ok(ListResource::Asset(AssetType::Provider)),
         "memory" => Ok(ListResource::Asset(AssetType::Memory)),
         "cron" => Ok(ListResource::Asset(AssetType::Cron)),
+        "plugin" => Ok(ListResource::Asset(AssetType::Plugin)),
         other => Err(SentraError::Message(format!(
             "{}: {other}",
             t("unknown list resource", "未知列表资源")
@@ -1311,7 +1312,7 @@ pub(crate) fn print_list_help() {
     println!("{}", t(
         "\
 Usage:
-  sentra list <skill|mcp|provider|memory|agent|cron> [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
+  sentra list <skill|mcp|provider|memory|agent|cron|plugin> [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
 
 Description:
   List discovered Sentra assets or configured agents.
@@ -1329,7 +1330,7 @@ Examples:
     ,
         "\
 用法:
-  sentra list <skill|mcp|provider|memory|agent|cron> [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
+  sentra list <skill|mcp|provider|memory|agent|cron|plugin> [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
 
 说明:
   列出发现的 Sentra 资产或已配置的 Agent。
