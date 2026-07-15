@@ -143,6 +143,7 @@ fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
             semantic_symbols,
         ),
         "cron" => format_cron_assets(items, semantic_symbols),
+        "plugin" => format_plugin_assets(items, semantic_symbols),
         _ => format_generic("Assets", value),
     }
 }
@@ -271,6 +272,49 @@ fn format_cron_assets(items: &[serde_json::Value], semantic_symbols: bool) -> St
                 t("ENABLED", "启用"),
                 t("SCHEDULE", "调度"),
                 t("PROMPT", "提示词"),
+            ],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
+    )
+}
+
+fn format_plugin_assets(items: &[serde_json::Value], semantic_symbols: bool) -> String {
+    let mut rows = Vec::new();
+    for item in items {
+        let agent = string_field(item, "agentName");
+        for data in data_items(item) {
+            rows.push(vec![
+                agent.clone(),
+                data.get("displayName")
+                    .or_else(|| data.get("name"))
+                    .or_else(|| data.get("id"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("-")
+                    .to_string(),
+                string_field(data, "version"),
+                plugin_source_label(data),
+                enabled_label(data),
+            ]);
+        }
+    }
+    format_list_view(
+        t("List plugins", "列出插件"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("plugin(s) discovered", "个插件已发现")
+        ),
+        &format!("{} `sentra list agent`", t("Next:", "下一步:")),
+        format_table(
+            &format!("{} ({})", t("Plugins", "插件"), rows.len()),
+            &[
+                t("AGENT", "AGENT"),
+                t("PLUGIN", "插件"),
+                t("VERSION", "版本"),
+                t("SOURCE", "来源"),
+                t("ENABLED", "启用"),
             ],
             rows,
             semantic_symbols,
@@ -1109,6 +1153,20 @@ fn model_names(value: &serde_json::Value) -> String {
     } else {
         names.join(", ")
     }
+}
+
+fn plugin_source_label(value: &serde_json::Value) -> String {
+    value
+        .get("installSource")
+        .and_then(|source| {
+            source
+                .get("reference")
+                .and_then(|value| value.as_str())
+                .or_else(|| source.get("kind").and_then(|value| value.as_str()))
+        })
+        .or_else(|| value.get("origin").and_then(|value| value.as_str()))
+        .unwrap_or("-")
+        .to_string()
 }
 
 fn scan_target_name(value: &serde_json::Value) -> String {

@@ -405,6 +405,76 @@ fn sentra_list_skill_outputs_assets_as_json() {
 }
 
 #[test]
+fn sentra_list_plugin_outputs_assets_as_json_without_raw_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_plugin_root = dir
+        .path()
+        .join(".codex")
+        .join("plugins")
+        .join("cache")
+        .join("market")
+        .join("stable")
+        .join("codex-plugin");
+    fs::create_dir_all(codex_plugin_root.join(".codex-plugin")).unwrap();
+    fs::write(
+        codex_plugin_root.join(".codex-plugin").join("plugin.json"),
+        r#"{
+          "name": "codex-plugin",
+          "version": "1.0.0",
+          "author": "Codex Team",
+          "apiKey": "sk-cli-plugin-secret",
+          "interface": {"displayName": "Codex Plugin"}
+        }"#,
+    )
+    .unwrap();
+    let opencode_home = dir.path().join(".config").join("opencode");
+    fs::create_dir_all(&opencode_home).unwrap();
+    fs::write(
+        opencode_home.join("opencode.json"),
+        r#"{
+          "plugin": ["superpowers@git+https://github.com/obra/superpowers.git"],
+          "provider": {"secret": {"options": {"apiKey": "sk-opencode-cli-secret"}}}
+        }"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "plugin", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("sk-cli-plugin-secret"));
+    assert!(!stdout.contains("sk-opencode-cli-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+
+    let codex = assets
+        .iter()
+        .find(|asset| asset["agentName"] == "codex")
+        .expect("missing codex plugin asset");
+    let opencode = assets
+        .iter()
+        .find(|asset| asset["agentName"] == "opencode")
+        .expect("missing opencode plugin asset");
+    assert_eq!(codex["assetType"], "plugin");
+    assert_eq!(codex["data"][0]["displayName"], "Codex Plugin");
+    assert_eq!(
+        codex["data"][0]["installSource"]["reference"],
+        "market/codex-plugin@1.0.0"
+    );
+    assert_eq!(opencode["data"][0]["name"], "superpowers");
+    assert_eq!(opencode["data"][0]["installSource"]["kind"], "git");
+}
+
+#[test]
 fn sentra_list_skill_terminal_outputs_skill_rows() {
     let dir = tempfile::tempdir().unwrap();
     write_skill(dir.path(), ".codex", "codex-alpha");
@@ -434,6 +504,46 @@ fn sentra_list_skill_terminal_outputs_skill_rows() {
     assert!(stdout.contains("codex-alpha"), "{stdout}");
     assert!(stdout.contains("codex-beta"), "{stdout}");
     assert!(stdout.contains("sentra-demo"), "{stdout}");
+}
+
+#[test]
+fn sentra_list_plugin_terminal_outputs_plugin_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".claude");
+    let plugin_root = home
+        .join("plugins")
+        .join("cache")
+        .join("official")
+        .join("reviewer")
+        .join("2.0.0");
+    fs::create_dir_all(plugin_root.join(".claude-plugin")).unwrap();
+    fs::write(
+        plugin_root.join(".claude-plugin").join("plugin.json"),
+        r#"{"name":"reviewer","version":"2.0.0","interface":{"displayName":"Reviewer"}}"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "plugin"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("List plugins"));
+    assert!(stdout.contains("Plugins (1)"));
+    assert!(stdout.contains("PLUGIN"));
+    assert!(stdout.contains("VERSION"));
+    assert!(stdout.contains("SOURCE"));
+    assert!(stdout.contains("Reviewer"));
+    assert!(stdout.contains("2.0.0"));
+    assert!(stdout.contains("official/reviewer@2.0.0"));
 }
 
 #[test]
@@ -2076,20 +2186,23 @@ fn sentra_scan_non_skill_resource_rejects_path() {
 
 #[test]
 fn sentra_scan_rejects_unknown_resources() {
-    let output = sentra_command().args(["scan", "mcp"]).output().unwrap();
+    let output = sentra_command().args(["scan", "plugin"]).output().unwrap();
 
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown scan resource: mcp"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown scan resource: plugin"));
 }
 
 #[test]
 fn sentra_list_rejects_unknown_resources() {
-    let output = sentra_command().args(["list", "plugin"]).output().unwrap();
+    let output = sentra_command()
+        .args(["list", "extension"])
+        .output()
+        .unwrap();
 
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown list resource: plugin"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown list resource: extension"));
 }
 
 #[test]
@@ -2099,7 +2212,7 @@ fn sentra_list_help_prints_usage() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron>"));
+    assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron|plugin>"));
     assert!(stdout.contains("--home <path>"));
     assert!(stdout.contains("--agent <name>"));
     assert!(stdout.contains("Examples:"));
