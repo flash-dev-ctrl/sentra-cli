@@ -2,6 +2,7 @@ use std::io::{self, IsTerminal, Write};
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Local};
 use sentra_lib::{SentraError, SentraResult};
 use unicode_width::UnicodeWidthStr;
 
@@ -144,6 +145,7 @@ fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
         ),
         "cron" => format_cron_assets(items, semantic_symbols),
         "plugin" => format_plugin_assets(items, semantic_symbols),
+        "process" => format_process_assets(items, semantic_symbols),
         _ => format_generic("Assets", value),
     }
 }
@@ -315,6 +317,44 @@ fn format_plugin_assets(items: &[serde_json::Value], semantic_symbols: bool) -> 
                 t("VERSION", "版本"),
                 t("SOURCE", "来源"),
                 t("ENABLED", "启用"),
+            ],
+            rows,
+            semantic_symbols,
+        ),
+        semantic_symbols,
+    )
+}
+
+fn format_process_assets(items: &[serde_json::Value], semantic_symbols: bool) -> String {
+    let mut rows = Vec::new();
+    for item in items {
+        let agent = string_field(item, "agentName");
+        for data in data_items(item) {
+            rows.push(vec![
+                agent.clone(),
+                number_field(data, "pid"),
+                started_at_field(data),
+                run_time_field(data),
+                string_field(data, "path"),
+            ]);
+        }
+    }
+    format_list_view(
+        t("List processes", "列出进程"),
+        &format!(
+            "{} {}",
+            rows.len(),
+            t("process(es) discovered", "个进程已发现")
+        ),
+        &format!("{} `sentra list agent`", t("Next:", "下一步:")),
+        format_table(
+            &format!("{} ({})", t("Processes", "进程"), rows.len()),
+            &[
+                t("AGENT", "AGENT"),
+                t("PID", "PID"),
+                t("STARTED", "启动时间"),
+                t("RUN TIME", "运行时间"),
+                t("PATH", "路径"),
             ],
             rows,
             semantic_symbols,
@@ -1100,6 +1140,65 @@ fn string_field(value: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
+fn number_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(|value| {
+            value
+                .as_u64()
+                .map(|value| value.to_string())
+                .or_else(|| value.as_i64().map(|value| value.to_string()))
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn started_at_field(value: &serde_json::Value) -> String {
+    let Some(seconds) = u64_field(value, "startedAt") else {
+        return "-".to_string();
+    };
+    if seconds == 0 {
+        return "-".to_string();
+    }
+    let Ok(seconds) = i64::try_from(seconds) else {
+        return seconds.to_string();
+    };
+    DateTime::from_timestamp(seconds, 0)
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| seconds.to_string())
+}
+
+fn run_time_field(value: &serde_json::Value) -> String {
+    u64_field(value, "runTimeSeconds")
+        .map(format_duration_seconds)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn u64_field(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(|value| value.as_u64())
+}
+
+fn format_duration_seconds(total_seconds: u64) -> String {
+    let days = total_seconds / 86_400;
+    let hours = (total_seconds % 86_400) / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+
+    if days > 0 {
+        format!("{days}d {hours:02}h {minutes:02}m {seconds:02}s")
+    } else if hours > 0 {
+        format!("{hours}h {minutes:02}m {seconds:02}s")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds:02}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
 fn display_text_field(value: &serde_json::Value, keys: &[&str]) -> String {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(|value| value.as_str()))
@@ -1303,6 +1402,71 @@ mod tests {
         assert!(output.contains("30 8 * * *"));
         assert!(output.contains("每天早上8:30获取最新新闻"));
         assert!(!output.contains("DESCRIPTION"));
+    }
+
+    #[test]
+    fn process_terminal_output_lists_process_rows_without_env() {
+        let value = serde_json::json!([
+            {
+                "assetType": "process",
+                "agentName": "codex",
+                "data": [
+                    {
+                        "pid": 42,
+                        "name": "codex.exe",
+                        "path": "C:\\Users\\me\\AppData\\Local\\Programs\\OpenAI\\Codex\\codex.exe",
+                        "cmdline": ["codex.exe", "--sandbox"],
+                        "startedAt": 1700000000,
+                        "runTimeSeconds": 3661,
+                        "env": {
+                            "OPENAI_API_KEY": "sk-****7890",
+                            "PATH": "C:\\bin"
+                        }
+                    }
+                ]
+            }
+        ]);
+
+        let output = format_assets(&value, false);
+
+        assert!(output.contains("List processes") || output.contains("列出进程"));
+        assert!(output.contains("1 process(es) discovered") || output.contains("1 个进程已发现"));
+        assert!(output.contains("AGENT"));
+        assert!(output.contains("PID"));
+        let started_header = if output.contains("STARTED") {
+            "STARTED"
+        } else {
+            "启动时间"
+        };
+        let run_time_header = if output.contains("RUN TIME") {
+            "RUN TIME"
+        } else {
+            "运行时间"
+        };
+        let path_header = if output.contains("PATH") {
+            "PATH"
+        } else {
+            "路径"
+        };
+        assert!(output.contains(started_header));
+        assert!(output.contains(run_time_header));
+        assert!(output.contains(path_header));
+        let header = output
+            .lines()
+            .find(|line| line.contains("AGENT") && line.contains(path_header))
+            .unwrap();
+        assert!(header.find(started_header).unwrap() < header.find(path_header).unwrap());
+        assert!(header.find(run_time_header).unwrap() < header.find(path_header).unwrap());
+        assert!(!output.contains("NAME"));
+        assert!(!output.contains("CMDLINE"));
+        assert!(output.contains("codex"));
+        assert!(output.contains("42"));
+        assert!(output.contains("2023-11"));
+        assert!(output.contains("1h 01m 01s"));
+        assert!(output.contains(r"C:\Users\me\AppData\Local\Programs\OpenAI\Codex\codex.exe"));
+        assert!(!output.contains("--sandbox"));
+        assert!(!output.contains("OPENAI_API_KEY"));
+        assert!(!output.contains("sk-"));
     }
 
     #[test]

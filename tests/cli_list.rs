@@ -2196,7 +2196,21 @@ fn sentra_scan_rejects_unknown_resources() {
 
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown scan resource: plugin"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        (stderr.contains("unknown scan resource") || stderr.contains("未知扫描资源"))
+            && stderr.contains("plugin")
+    );
+
+    let output = sentra_command().args(["scan", "process"]).output().unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        (stderr.contains("unknown scan resource") || stderr.contains("未知扫描资源"))
+            && stderr.contains("process")
+    );
 }
 
 #[test]
@@ -2218,9 +2232,9 @@ fn sentra_list_help_prints_usage() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron|plugin>"));
-    assert!(stdout.contains("--home <path>"));
-    assert!(stdout.contains("--agent <name>"));
+    assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron|plugin|process>"));
+    assert!(stdout.contains("--home <path>") || stdout.contains("--home <路径>"));
+    assert!(stdout.contains("--agent <name>") || stdout.contains("--agent <名称>"));
     assert!(stdout.contains("Examples:"));
     assert!(!stdout.contains("sentra scan <skill|cron|memory|provider>"));
     assert!(!stdout.contains("sentra skill add <url>"));
