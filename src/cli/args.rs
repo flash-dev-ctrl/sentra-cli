@@ -571,6 +571,34 @@ mod tests {
     }
 
     #[test]
+    fn list_process_parses_as_process_asset() {
+        let command = parse_args(os_args(&["list", "process", "--format", "json"])).unwrap();
+
+        assert!(matches!(
+            command,
+            Command::List {
+                resource: ListResource::Asset(AssetType::Process),
+                output: OutputOptions {
+                    format: OutputFormat::Json,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn scan_process_is_not_supported() {
+        let err = parse_args(os_args(&["scan", "process"])).unwrap_err();
+        let message = err.to_string();
+
+        assert!(
+            (message.contains("unknown scan resource") || message.contains("未知扫描资源"))
+                && message.contains("process")
+        );
+    }
+
+    #[test]
     fn install_command_accepts_supported_agents() {
         let codex = parse_args(os_args(&["install", "codex"])).unwrap();
         assert!(matches!(codex, Command::Install { agent } if agent == "codex"));
@@ -800,6 +828,7 @@ fn parse_list_resource(resource: &str) -> SentraResult<ListResource> {
         "memory" => Ok(ListResource::Asset(AssetType::Memory)),
         "cron" => Ok(ListResource::Asset(AssetType::Cron)),
         "plugin" => Ok(ListResource::Asset(AssetType::Plugin)),
+        "process" => Ok(ListResource::Asset(AssetType::Process)),
         other => Err(SentraError::Message(format!(
             "{}: {other}",
             t("unknown list resource", "未知列表资源")
@@ -1312,7 +1341,7 @@ pub(crate) fn print_list_help() {
     println!("{}", t(
         "\
 Usage:
-  sentra list <skill|mcp|provider|memory|agent|cron|plugin> [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
+  sentra list <skill|mcp|provider|memory|agent|cron|plugin|process> [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
 
 Description:
   List discovered Sentra assets or configured agents.
@@ -1330,7 +1359,7 @@ Examples:
     ,
         "\
 用法:
-  sentra list <skill|mcp|provider|memory|agent|cron|plugin> [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
+  sentra list <skill|mcp|provider|memory|agent|cron|plugin|process> [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
 
 说明:
   列出发现的 Sentra 资产或已配置的 Agent。

@@ -1,0 +1,8 @@
+{
+  "rust-analyzer.cargo.targetDir": "target/rust-analyzer",
+  "rust-analyzer.cargo.extraEnv": {
+    "CARGO_HOME": "${workspaceFolder}\\.cargo-home",
+    "CARGO_INCREMENTAL": "1"
+  },
+  "rust-analyzer.checkOnSave.enable": true
+}
