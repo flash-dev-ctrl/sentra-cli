@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.6
+
+- Added process asset listing for supported agents.
+- Added skill asset path output in terminal lists.
+- Updated bundled Sentra library process asset specification.
+- Improved local Cargo cache and rust-analyzer isolation documentation.
+
 ## 0.2.5
 
 - Added installed-agent discovery when an agent home has not been initialized yet.
