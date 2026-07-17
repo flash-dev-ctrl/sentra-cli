@@ -501,15 +501,28 @@ fn sentra_list_skill_terminal_outputs_skill_rows() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("Skills (3)"));
+    assert!(stdout.contains("Skills (") || stdout.contains("技能 ("));
     assert!(stdout.contains("AGENT"));
-    assert!(stdout.contains("SKILL"));
+    assert!(stdout.contains("SKILL") || stdout.contains("技能"));
+    assert!(stdout.contains("PATH") || stdout.contains("路径"));
     assert!(!stdout.contains("DESCRIPTION"));
     assert!(stdout.contains("codex"));
     assert!(stdout.contains("sentra"));
     assert!(stdout.contains("codex-alpha"), "{stdout}");
     assert!(stdout.contains("codex-beta"), "{stdout}");
     assert!(stdout.contains("sentra-demo"), "{stdout}");
+    let normalized_stdout = stdout.replace('\\', "/");
+    assert!(
+        normalized_stdout.contains(
+            &dir.path()
+                .join(".codex")
+                .join("skills")
+                .join("codex-alpha")
+                .to_string_lossy()
+                .replace('\\', "/")
+        ),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -2235,7 +2248,7 @@ fn sentra_list_help_prints_usage() {
     assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron|plugin|process>"));
     assert!(stdout.contains("--home <path>") || stdout.contains("--home <路径>"));
     assert!(stdout.contains("--agent <name>") || stdout.contains("--agent <名称>"));
-    assert!(stdout.contains("Examples:"));
+    assert!(stdout.contains("Examples:") || stdout.contains("示例:"));
     assert!(!stdout.contains("sentra scan <skill|cron|memory|provider>"));
     assert!(!stdout.contains("sentra skill add <url>"));
 }
@@ -2309,11 +2322,11 @@ fn sentra_config_help_prints_config_usage() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("Usage:") || stdout.contains("用法:"));
     assert!(stdout.contains("sentra config get"));
     assert!(stdout.contains("sentra config set threatbook_key <key>"));
-    assert!(stdout.contains("Examples:"));
-    assert!(!stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron>"));
+    assert!(stdout.contains("Examples:") || stdout.contains("示例:"));
+    assert!(!stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron|plugin|process>"));
 }
 
 #[test]

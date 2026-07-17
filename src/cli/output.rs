@@ -375,6 +375,7 @@ fn format_skill_assets(items: &[serde_json::Value], semantic_symbols: bool) -> S
                     .and_then(|value| value.as_str())
                     .unwrap_or("-")
                     .to_string(),
+                string_field(data, "home"),
             ]);
         }
     }
@@ -392,7 +393,7 @@ fn format_skill_assets(items: &[serde_json::Value], semantic_symbols: bool) -> S
         ),
         format_table(
             &format!("{} ({})", t("Skills", "技能"), rows.len()),
-            &[t("AGENT", "AGENT"), t("SKILL", "技能")],
+            &[t("AGENT", "AGENT"), t("SKILL", "技能"), t("PATH", "路径")],
             rows,
             semantic_symbols,
         ),
@@ -1308,10 +1309,12 @@ mod tests {
                 "data": [
                     {
                         "name": "Spreadsheets",
+                        "home": "C:\\Users\\me\\.claude\\skills\\spreadsheets",
                         "description": "Use this skill when a user requests to create, modify, analyze, visualize, or work with spreadsheet files (`.xlsx`, `.xls`, `.csv`, `.tsv`) or Google Sheets-targeted spreadsheet artifacts with formulas, formatting, charts, tables, and recalculation."
                     },
                     {
                         "name": "ssh-port-forward-proxy",
+                        "home": "C:\\Users\\me\\.claude\\skills\\ssh-port-forward-proxy",
                         "description": "通过 SSH 端口转发配置远程主机使用本地代理。适用于在远程服务器上设置代理访问、通过隧道启用 apt/dnf/pip/docker，或需要将远程流量路由到本地代理的场景。"
                     }
                 ]
@@ -1322,6 +1325,7 @@ mod tests {
                 "data": [
                     {
                         "name": "documents",
+                        "home": "C:\\Users\\me\\.claude\\skills\\documents",
                         "description": "Create and edit documents."
                     }
                 ]
@@ -1330,14 +1334,18 @@ mod tests {
 
         let output = format_assets(&value, false);
 
-        assert!(output.contains("Skills (3)"));
+        assert!(output.contains("Skills (3)") || output.contains("技能 (3)"));
         assert!(output.contains("AGENT"));
-        assert!(output.contains("SKILL"));
+        assert!(output.contains("SKILL") || output.contains("技能"));
+        assert!(output.contains("PATH") || output.contains("路径"));
         assert!(!output.contains("DESCRIPTION"));
         assert!(output.contains("claude-cli"));
         assert!(output.contains("Spreadsheets"), "{output}");
         assert!(output.contains("ssh-port-forward-proxy"), "{output}");
         assert!(output.contains("documents"), "{output}");
+        assert!(output.contains(r"C:\Users\me\.claude\skills\spreadsheets"));
+        assert!(output.contains(r"C:\Users\me\.claude\skills\ssh-port-forward-proxy"));
+        assert!(output.contains(r"C:\Users\me\.claude\skills\documents"));
         assert!(!output.contains("Google Sheets-targeted"), "{output}");
         assert!(!output.contains("端口转发"), "{output}");
     }
