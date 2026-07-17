@@ -513,14 +513,11 @@ fn sentra_list_skill_terminal_outputs_skill_rows() {
     assert!(stdout.contains("sentra-demo"), "{stdout}");
     let normalized_stdout = stdout.replace('\\', "/");
     assert!(
-        normalized_stdout.contains(
-            &dir.path()
-                .join(".codex")
-                .join("skills")
-                .join("codex-alpha")
-                .to_string_lossy()
-                .replace('\\', "/")
-        ),
+        normalized_stdout.contains("/.codex/skills/codex-alpha"),
+        "{stdout}"
+    );
+    assert!(
+        normalized_stdout.contains("/.sentra/skills/sentra-demo"),
         "{stdout}"
     );
 }
