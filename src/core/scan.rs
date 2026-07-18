@@ -217,7 +217,9 @@ async fn collect_agent_targets(
                 agent_title: agent_title.clone(),
                 agent_home: agent_home.clone(),
             };
-            push_agent_scan_targets(resource, asset.data_async().await?, metadata, &mut targets)?;
+            let data = serde_json::to_value(asset.data_async().await?)
+                .map_err(|err| SentraError::Message(err.to_string()))?;
+            push_agent_scan_targets(resource, data, metadata, &mut targets)?;
         }
     }
     Ok(targets)

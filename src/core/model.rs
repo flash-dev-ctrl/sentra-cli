@@ -388,7 +388,8 @@ fn mutate_provider_at(
     )))
 }
 
-fn provider_items(value: serde_json::Value) -> SentraResult<Vec<ProviderData>> {
+fn provider_items(value: impl Serialize) -> SentraResult<Vec<ProviderData>> {
+    let value = serde_json::to_value(value).map_err(|err| SentraError::Message(err.to_string()))?;
     serde_json::from_value(value).map_err(|err| SentraError::Message(err.to_string()))
 }
 

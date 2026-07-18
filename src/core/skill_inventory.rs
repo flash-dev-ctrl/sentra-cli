@@ -78,7 +78,8 @@ pub(crate) async fn collect_skill_inventories(
 async fn inventory_for_agent(agent: &Agent) -> SentraResult<AgentSkillInventory> {
     let mut skills = Vec::new();
     for asset in agent.get_assets(AssetType::Skill)? {
-        let data = asset.data_async().await?;
+        let data = serde_json::to_value(asset.data_async().await?)
+            .map_err(|err| SentraError::Message(err.to_string()))?;
         let mut items: Vec<SkillData> =
             serde_json::from_value(data).map_err(|err| SentraError::Message(err.to_string()))?;
         skills.append(&mut items);
