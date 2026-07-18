@@ -1,0 +1,132 @@
+[
+  {
+    "id": "abacus",
+    "name": "Abacus",
+    "baseUrl": "https://routellm.abacus.ai/v1"
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "baseUrl": "https://api.anthropic.com"
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com/v1"
+  },
+  {
+    "id": "azure-openai",
+    "name": "Azure OpenAI",
+    "baseUrl": ""
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1"
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi",
+    "baseUrl": "https://api.moonshot.cn/v1"
+  },
+  {
+    "id": "kimi-for-coding",
+    "name": "Kimi For Coding",
+    "baseUrl": "https://api.kimi.com/coding/v1"
+  },
+  {
+    "id": "kimi_coding",
+    "name": "Kimi For Coding",
+    "baseUrl": "https://api.kimi.com/coding/v1"
+  },
+  {
+    "id": "moonshotai",
+    "name": "Moonshot AI",
+    "baseUrl": "https://api.moonshot.ai/v1"
+  },
+  {
+    "id": "moonshotai-cn",
+    "name": "Moonshot AI (China)",
+    "baseUrl": "https://api.moonshot.cn/v1"
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com"
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "baseUrl": "https://api.groq.com/openai/v1"
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "baseUrl": "https://api.minimax.io/anthropic/v1"
+  },
+  {
+    "id": "minimax-cn",
+    "name": "MiniMax",
+    "baseUrl": "https://api.minimaxi.com/anthropic/v1"
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral AI",
+    "baseUrl": "https://api.mistral.ai/v1"
+  },
+  {
+    "id": "xai",
+    "name": "xAI",
+    "baseUrl": "https://api.x.ai/v1"
+  },
+  {
+    "id": "opencode",
+    "name": "OpenCode Zen",
+    "baseUrl": "https://opencode.ai/zen/v1"
+  },
+  {
+    "id": "opencode-go",
+    "name": "OpenCode Go",
+    "baseUrl": "https://opencode.ai/zen/go/v1"
+  },
+  {
+    "id": "opencode_go",
+    "name": "OpenCode Go",
+    "baseUrl": "https://opencode.ai/zen/go/v1"
+  },
+  {
+    "id": "google",
+    "name": "Google AI",
+    "baseUrl": ""
+  },
+  {
+    "id": "cerebras",
+    "name": "Cerebras",
+    "baseUrl": ""
+  },
+  {
+    "id": "nvidia",
+    "name": "NVIDIA",
+    "baseUrl": "https://integrate.api.nvidia.com/v1"
+  },
+  {
+    "id": "cloudflare",
+    "name": "Cloudflare AI",
+    "baseUrl": ""
+  },
+  {
+    "id": "vercel-ai-gateway",
+    "name": "Vercel AI Gateway",
+    "baseUrl": ""
+  },
+  {
+    "id": "zai",
+    "name": "Z.AI",
+    "baseUrl": ""
+  },
+  {
+    "id": "ant-ling",
+    "name": "Ant Ling",
+    "baseUrl": ""
+  }
+]

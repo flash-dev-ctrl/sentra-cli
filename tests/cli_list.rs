@@ -223,6 +223,40 @@ fn sentra_list_agent_outputs_discovered_agents_as_json() {
 }
 
 #[test]
+fn kimi_code_sentra_list_agent_outputs_discovered_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".kimi-code")).unwrap();
+
+    let output = sentra_command()
+        .args(["list", "agent", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let agents = value.as_array().unwrap();
+    let kimi = agents
+        .iter()
+        .find(|agent| agent["name"] == "kimi-code")
+        .expect("missing kimi-code");
+
+    assert_eq!(kimi["title"], "Kimi Code");
+    assert!(
+        kimi["home"]
+            .as_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("/.kimi-code")
+    );
+}
+
+#[test]
 fn sentra_list_writes_json_to_output_file() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".codex")).unwrap();
@@ -719,6 +753,104 @@ fn sentra_list_provider_collects_claude_oauth_account_without_tokens() {
 }
 
 #[test]
+fn kimi_code_sentra_list_provider_outputs_json_without_raw_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("config.toml"),
+        r#"
+default_model = "kimi-code/kimi-for-coding"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+api_key = "sk-kimi-cli-secret"
+
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+model = "kimi-k2-cli"
+"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args([
+            "list",
+            "provider",
+            "--agent",
+            "kimi-code",
+            "--format",
+            "json",
+        ])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("sk-kimi-cli-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0]["agentName"], "kimi-code");
+    assert_eq!(assets[0]["data"][0]["providerId"], "kimi");
+    assert_eq!(
+        assets[0]["data"][0]["baseUrl"],
+        "https://api.kimi.com/coding/v1"
+    );
+    assert_eq!(assets[0]["data"][0]["models"][0]["id"], "kimi-k2-cli");
+}
+
+#[test]
+fn kimi_code_sentra_list_provider_terminal_uses_catalog_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("config.toml"),
+        r#"
+default_model = "kimi-code/kimi-for-coding"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+api_key = "sk-kimi-cli-secret"
+
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+model = "kimi-k2-cli"
+"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "provider", "--agent", "kimi-code"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Kimi For Coding"), "{stdout}");
+    assert!(
+        stdout.contains("https://api.kimi.com/coding/v1"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("managed:kimi-code"), "{stdout}");
+    assert!(!stdout.contains("sk-kimi-cli-secret"), "{stdout}");
+}
+
+#[test]
 fn sentra_list_provider_accepts_home_path_fixture() {
     let home = account_home_fixture();
     let codex_auth: serde_json::Value = serde_json::from_str(FIXTURE_CODEX_AUTH).unwrap();
@@ -851,6 +983,38 @@ fn sentra_list_unknown_agent_filter_returns_empty_json() {
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn kimi_code_sentra_list_mcp_outputs_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("mcp.json"),
+        r#"{"mcpServers":{"remote":{"url":"https://mcp.example.test/mcp"}}}"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "mcp", "--agent", "kimi-code", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0]["agentName"], "kimi-code");
+    assert_eq!(assets[0]["data"][0]["name"], "remote");
+    assert_eq!(assets[0]["data"][0]["type"], "http");
 }
 
 #[test]
@@ -1116,6 +1280,176 @@ fn sentra_model_fetches_opencode_provider_models_with_runtime_api_key() {
     );
     assert!(models.iter().any(|model| model["model"] == "fresh-gpt"));
     assert!(models.iter().any(|model| model["model"] == "fresh-mini"));
+}
+
+#[test]
+fn kimi_code_sentra_model_fetches_provider_models_with_runtime_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = run_json_server(r#"{"data":[{"id":"kimi-fresh","name":"Kimi Fresh"}]}"#);
+    let home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            r#"
+default_model = "kimi-code/kimi-configured"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "{}"
+api_key = "sk-kimi-model-secret"
+
+[models."kimi-code/kimi-configured"]
+provider = "managed:kimi-code"
+model = "kimi-configured"
+"#,
+            server.base_url
+        ),
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["model", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let request = server.request();
+    assert_eq!(request.path, "/models");
+    assert_eq!(
+        request.authorization.as_deref(),
+        Some("Bearer sk-kimi-model-secret")
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("sk-kimi-model-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let models = value.as_array().unwrap();
+
+    assert!(models.iter().any(|model| {
+        model["agentName"] == "kimi-code"
+            && model["providerType"] == "gateway"
+            && model["model"] == "kimi-configured"
+    }));
+    assert!(
+        models
+            .iter()
+            .any(|model| { model["agentName"] == "kimi-code" && model["model"] == "kimi-fresh" })
+    );
+}
+
+#[test]
+fn kimi_code_sentra_model_set_writes_config_toml() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".kimi-code")).unwrap();
+
+    let output = sentra_command()
+        .args([
+            "model",
+            "set",
+            "--agent",
+            "kimi-code",
+            "--base-url",
+            "https://api.kimi.com/coding/v1",
+            "--api-key",
+            "sk-kimi-set-cli-secret",
+            "--model",
+            "kimi-k2-cli",
+            "--protocol",
+            "anthropic_messages",
+        ])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("kimi-code"));
+    assert!(stderr.contains("Base URL: https://api.kimi.com/coding/v1"));
+    assert!(stderr.contains("kimi-k2-cli"));
+    assert!(!stderr.contains("sk-kimi-set-cli-secret"));
+
+    let content = fs::read_to_string(dir.path().join(".kimi-code").join("config.toml")).unwrap();
+    assert!(content.contains(r#"default_model = "kimi-code/kimi-k2-cli""#));
+    assert!(content.contains(r#"[providers."managed:kimi-code"]"#));
+    assert!(content.contains(r#"type = "anthropic""#));
+    assert!(content.contains(r#"base_url = "https://api.kimi.com/coding/v1""#));
+    assert!(content.contains(r#"api_key = "sk-kimi-set-cli-secret""#));
+    assert!(content.contains(r#"[models."kimi-code/kimi-k2-cli"]"#));
+    assert!(content.contains(r#"provider = "managed:kimi-code""#));
+    assert!(content.contains(r#"model = "kimi-k2-cli""#));
+}
+
+#[test]
+fn kimi_code_sentra_model_delete_removes_config_toml_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("config.toml"),
+        r#"
+default_model = "kimi-code/kimi-old"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+api_key = "sk-old"
+
+[providers.other]
+type = "anthropic"
+base_url = "https://anthropic.example.test"
+api_key = "sk-other"
+
+[models."kimi-code/kimi-old"]
+provider = "managed:kimi-code"
+model = "kimi-old"
+
+[models."kimi-code/claude"]
+provider = "other"
+model = "claude"
+"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args([
+            "model",
+            "delete",
+            "--agent",
+            "kimi-code",
+            "--base-url",
+            "https://api.kimi.com/coding/v1",
+        ])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("kimi-code"));
+    assert!(stderr.contains("Base URL: https://api.kimi.com/coding/v1"));
+
+    let content = fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(!content.contains("default_model"));
+    assert!(!content.contains("managed:kimi-code"));
+    assert!(!content.contains("kimi-code/kimi-old"));
+    assert!(content.contains("[providers.other]"));
+    assert!(content.contains(r#"[models."kimi-code/claude"]"#));
 }
 
 #[test]
@@ -1494,6 +1828,35 @@ fn sentra_scan_memory_skips_missing_codex_global_state() {
             .is_empty()
     );
     assert!(scans[0]["report"]["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn kimi_code_sentra_scan_memory_outputs_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("AGENTS.md"), "No known risky marker.").unwrap();
+
+    let output = sentra_command()
+        .args(["scan", "memory", "--agent", "kimi-code", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let scans = value.as_array().unwrap();
+
+    assert_eq!(scans.len(), 1);
+    assert_eq!(scans[0]["type"], "memory");
+    assert_eq!(scans[0]["agent"], "kimi-code");
+    assert_eq!(scans[0]["name"], "AGENTS.md");
+    assert_eq!(scans[0]["report"]["metadata"]["scanner"], "memory-scanner");
 }
 
 #[test]
@@ -2393,7 +2756,9 @@ fn contains_file(dir: &std::path::Path) -> bool {
 }
 
 fn sentra_command() -> Command {
-    Command::new(std::env::var("CARGO_BIN_EXE_sentra").unwrap())
+    let mut command = Command::new(std::env::var("CARGO_BIN_EXE_sentra").unwrap());
+    command.env_remove("KIMI_CODE_HOME");
+    command
 }
 
 fn write_agent_binary(home: &Path, name: &str) {

@@ -29,7 +29,8 @@ pub(crate) async fn run(
                 let agent_title = agent.title().to_string();
                 for asset in agent.get_assets(asset_type)? {
                     let asset_type = asset.asset_type();
-                    let data = asset.data_async().await?;
+                    let data = serde_json::to_value(asset.data_async().await?)
+                        .map_err(|err| SentraError::Message(err.to_string()))?;
                     if data.as_array().is_some_and(|items| items.is_empty()) {
                         continue;
                     }

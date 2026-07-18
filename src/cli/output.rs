@@ -1,6 +1,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Local};
 use sentra_lib::{SentraError, SentraResult};
@@ -9,6 +10,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::cli::args::{OutputFormat, OutputOptions};
 use crate::cli::i18n::{t, yes_no};
 use crate::tui::theme::{AnsiStyle, paint, severity_ansi_style};
+
+const PROVIDER_CATALOG_JSON: &str = include_str!("../catelogs/providers.json");
 
 pub(crate) fn print_json<T: serde::Serialize>(value: T) -> SentraResult<()> {
     let json = serde_json::to_string_pretty(&value)
@@ -157,11 +160,12 @@ fn format_provider_assets(items: &[serde_json::Value], semantic_symbols: bool) -
         for provider in data_items(item) {
             rows.push(vec![
                 agent.clone(),
-                string_field(provider, "name"),
+                provider_terminal_name(provider),
                 string_field(provider, "providerType"),
                 account_label(provider),
                 enabled_label(provider),
-                model_names(provider),
+                current_model_name(provider),
+                model_count(provider),
                 string_field(provider, "baseUrl"),
             ]);
         }
@@ -186,7 +190,8 @@ fn format_provider_assets(items: &[serde_json::Value], semantic_symbols: bool) -
                 t("TYPE", "类型"),
                 t("ACCOUNT", "账户"),
                 t("ENABLED", "启用"),
-                t("MODELS", "模型"),
+                t("MODEL", "模型"),
+                t("COUNT", "数量"),
                 t("BASE URL", "BASE URL"),
             ],
             rows,
@@ -194,6 +199,87 @@ fn format_provider_assets(items: &[serde_json::Value], semantic_symbols: bool) -
         ),
         semantic_symbols,
     )
+}
+
+fn provider_terminal_name(provider: &serde_json::Value) -> String {
+    provider_data_catalog_name(provider).unwrap_or_else(|| string_field(provider, "name"))
+}
+
+fn provider_data_catalog_name(provider_data: &serde_json::Value) -> Option<String> {
+    let provider = provider_data;
+    provider
+        .get("baseUrl")
+        .and_then(|value| value.as_str())
+        .and_then(catalog_name_by_base_url)
+        .or_else(|| {
+            ["providerId", "rawProviderId"]
+                .iter()
+                .filter_map(|key| provider.get(*key).and_then(|value| value.as_str()))
+                .find_map(catalog_name_by_id)
+        })
+}
+
+fn catalog_name_by_id(id: &str) -> Option<String> {
+    let id = normalized_provider_key(id);
+    catalog_providers()?.iter().find_map(|provider| {
+        let provider_id = provider.get("id").and_then(|value| value.as_str());
+        let aliases = provider
+            .get("aliases")
+            .and_then(|value| value.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str());
+        provider_id
+            .into_iter()
+            .chain(aliases)
+            .any(|value| normalized_provider_key(value) == id)
+            .then(|| catalog_display_name(provider))
+            .flatten()
+    })
+}
+
+fn catalog_name_by_base_url(base_url: &str) -> Option<String> {
+    let base_url = normalized_provider_url(base_url);
+    catalog_providers()?.iter().find_map(|provider| {
+        let provider_base_url = provider.get("baseUrl").and_then(|value| value.as_str());
+        let endpoints = provider
+            .get("endpoints")
+            .and_then(|value| value.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|endpoint| endpoint.get("baseUrl").and_then(|value| value.as_str()));
+        provider_base_url
+            .into_iter()
+            .chain(endpoints)
+            .any(|value| normalized_provider_url(value) == base_url)
+            .then(|| catalog_display_name(provider))
+            .flatten()
+    })
+}
+
+fn catalog_display_name(provider: &serde_json::Value) -> Option<String> {
+    provider
+        .get("displayName")
+        .or_else(|| provider.get("name"))
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
+fn catalog_providers() -> Option<&'static Vec<serde_json::Value>> {
+    static CATALOG: OnceLock<serde_json::Value> = OnceLock::new();
+    CATALOG
+        .get_or_init(|| {
+            serde_json::from_str(PROVIDER_CATALOG_JSON).expect("embedded provider catalog is valid")
+        })
+        .as_array()
+}
+
+fn normalized_provider_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace('_', "-")
+}
+
+fn normalized_provider_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
 fn format_named_asset_items(
@@ -1236,23 +1322,32 @@ fn bool_label(value: &serde_json::Value, key: &str) -> String {
     }
 }
 
-fn model_names(value: &serde_json::Value) -> String {
-    let names: Vec<&str> = value
+fn current_model_name(value: &serde_json::Value) -> String {
+    let Some(models) = value.get("models").and_then(|value| value.as_array()) else {
+        return "-".to_string();
+    };
+    models
+        .iter()
+        .find(|model| model.get("enabled").and_then(|value| value.as_bool()) == Some(true))
+        .or_else(|| models.first())
+        .and_then(model_name)
+        .unwrap_or("-")
+        .to_string()
+}
+
+fn model_count(value: &serde_json::Value) -> String {
+    value
         .get("models")
         .and_then(|value| value.as_array())
-        .map(|models| {
-            models
-                .iter()
-                .filter_map(|model| model.get("name").or_else(|| model.get("id")))
-                .filter_map(|value| value.as_str())
-                .collect()
-        })
-        .unwrap_or_default();
-    if names.is_empty() {
-        "-".to_string()
-    } else {
-        names.join(", ")
-    }
+        .map(|models| models.len().to_string())
+        .unwrap_or_else(|| "0".to_string())
+}
+
+fn model_name(model: &serde_json::Value) -> Option<&str> {
+    model
+        .get("name")
+        .or_else(|| model.get("id"))
+        .and_then(|value| value.as_str())
 }
 
 fn plugin_source_label(value: &serde_json::Value) -> String {
@@ -1348,6 +1443,39 @@ mod tests {
         assert!(output.contains(r"C:\Users\me\.claude\skills\documents"));
         assert!(!output.contains("Google Sheets-targeted"), "{output}");
         assert!(!output.contains("端口转发"), "{output}");
+    }
+
+    #[test]
+    fn provider_terminal_output_shows_current_model_and_count() {
+        let value = serde_json::json!([
+            {
+                "assetType": "provider",
+                "agentName": "kimi-code",
+                "data": [
+                    {
+                        "name": "managed:kimi-code",
+                        "providerType": "gateway",
+                        "providerId": "kimi",
+                        "rawProviderId": "managed:kimi-code",
+                        "baseUrl": "https://api.kimi.com/coding/v1",
+                        "enabled": true,
+                        "models": [
+                            {"id": "kimi-k2-cli", "name": "kimi-code/kimi-k2-cli", "enabled": true},
+                            {"id": "kimi-unused", "name": "kimi-code/kimi-unused", "enabled": false}
+                        ]
+                    }
+                ]
+            }
+        ]);
+
+        let output = format_assets(&value, false);
+
+        assert!(output.contains("MODEL") || output.contains("模型"));
+        assert!(output.contains("COUNT") || output.contains("数量"));
+        assert!(output.contains("Kimi For Coding"), "{output}");
+        assert!(output.contains("kimi-code/kimi-k2-cli"), "{output}");
+        assert!(output.contains("2"), "{output}");
+        assert!(!output.contains("kimi-code/kimi-unused"), "{output}");
     }
 
     #[test]
