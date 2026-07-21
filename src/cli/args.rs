@@ -67,6 +67,7 @@ pub(crate) enum Command {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ListResource {
+    All,
     Agent,
     Asset(AssetType),
 }
@@ -207,12 +208,14 @@ fn parse_install(args: &[OsString]) -> SentraResult<Command> {
             args[1].to_string_lossy()
         )));
     }
-    match agent.as_str() {
-        "codex" | "claude" | "kimi-code" | "opencode" | "pi" => Ok(Command::Install { agent }),
-        other => Err(SentraError::Message(format!(
+    if is_install_target(&agent) {
+        Ok(Command::Install { agent })
+    } else {
+        Err(SentraError::Message(format!(
             "{}: {other}",
-            t("unsupported install agent", "不支持的安装目标")
-        ))),
+            t("unsupported install agent", "不支持的安装目标"),
+            other = agent
+        )))
     }
 }
 
@@ -244,15 +247,39 @@ fn parse_uninstall(args: &[OsString]) -> SentraResult<Command> {
     let agent = agent.ok_or_else(|| {
         SentraError::Message(t("missing uninstall agent", "缺少卸载目标").to_string())
     })?;
-    match agent.as_str() {
-        "codex" | "claude" | "kimi-code" | "opencode" | "pi" => {
-            Ok(Command::Uninstall { agent, force })
-        }
-        other => Err(SentraError::Message(format!(
+    if is_install_target(&agent) {
+        Ok(Command::Uninstall { agent, force })
+    } else {
+        Err(SentraError::Message(format!(
             "{}: {other}",
-            t("unsupported uninstall agent", "不支持的卸载目标")
-        ))),
+            t("unsupported uninstall agent", "不支持的卸载目标"),
+            other = agent
+        )))
     }
+}
+
+fn is_install_target(agent: &str) -> bool {
+    matches!(
+        agent,
+        "antigravity"
+            | "claude"
+            | "claude-cli"
+            | "codebuddy"
+            | "coder"
+            | "codex"
+            | "cursor"
+            | "kimi-code"
+            | "kiro"
+            | "lingcode"
+            | "marvis"
+            | "opencode"
+            | "pi"
+            | "qoder"
+            | "qoderwork"
+            | "trae"
+            | "vscode"
+            | "workbuddy"
+    )
 }
 
 fn parse_config(args: &[OsString]) -> SentraResult<Command> {
@@ -427,13 +454,14 @@ fn parse_list(args: &[OsString]) -> SentraResult<Command> {
     }
 
     let (resource, options) = match args.first() {
-        Some(resource) => (
-            parse_list_resource(&resource.to_string_lossy())?,
+        Some(resource) if !resource.to_string_lossy().starts_with('-') => (
+            Some(parse_list_resource(&resource.to_string_lossy())?),
             &args[1..],
         ),
-        None => (ListResource::Agent, &args[0..]),
+        _ => (None, args),
     };
     let (home, agent, output) = parse_list_options(options)?;
+    let resource = resource.unwrap_or(ListResource::All);
 
     Ok(Command::List {
         resource,
@@ -590,6 +618,42 @@ mod tests {
     }
 
     #[test]
+    fn list_options_without_resource_parse_as_all_assets() {
+        let command = parse_args(os_args(&["list", "--format", "json"])).unwrap();
+
+        assert!(matches!(
+            command,
+            Command::List {
+                resource: ListResource::All,
+                output: OutputOptions {
+                    format: OutputFormat::Json,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn list_options_with_agent_without_resource_parse_as_all_assets() {
+        let command = parse_args(os_args(&["list", "--agent", "codex-ide", "--format", "json"]))
+            .unwrap();
+
+        assert!(matches!(
+            command,
+            Command::List {
+                resource: ListResource::All,
+                agent: Some(agent),
+                output: OutputOptions {
+                    format: OutputFormat::Json,
+                    ..
+                },
+                ..
+            } if agent == "codex-ide"
+        ));
+    }
+
+    #[test]
     fn scan_process_is_not_supported() {
         let err = parse_args(os_args(&["scan", "process"])).unwrap_err();
         let message = err.to_string();
@@ -602,20 +666,28 @@ mod tests {
 
     #[test]
     fn install_command_accepts_supported_agents() {
-        let codex = parse_args(os_args(&["install", "codex"])).unwrap();
-        assert!(matches!(codex, Command::Install { agent } if agent == "codex"));
-
-        let claude = parse_args(os_args(&["install", "claude"])).unwrap();
-        assert!(matches!(claude, Command::Install { agent } if agent == "claude"));
-
-        let opencode = parse_args(os_args(&["install", "opencode"])).unwrap();
-        assert!(matches!(opencode, Command::Install { agent } if agent == "opencode"));
-
-        let kimi = parse_args(os_args(&["install", "kimi-code"])).unwrap();
-        assert!(matches!(kimi, Command::Install { agent } if agent == "kimi-code"));
-
-        let pi = parse_args(os_args(&["install", "pi"])).unwrap();
-        assert!(matches!(pi, Command::Install { agent } if agent == "pi"));
+        for target in [
+            "antigravity",
+            "claude",
+            "codebuddy",
+            "coder",
+            "codex",
+            "cursor",
+            "kimi-code",
+            "kiro",
+            "lingcode",
+            "marvis",
+            "opencode",
+            "pi",
+            "qoder",
+            "qoderwork",
+            "trae",
+            "vscode",
+            "workbuddy",
+        ] {
+            let command = parse_args(os_args(&["install", target])).unwrap();
+            assert!(matches!(command, Command::Install { agent } if agent == target));
+        }
     }
 
     #[test]
@@ -627,22 +699,30 @@ mod tests {
 
     #[test]
     fn uninstall_command_accepts_supported_agents() {
-        let codex = parse_args(os_args(&["uninstall", "codex"])).unwrap();
-        assert!(matches!(codex, Command::Uninstall { agent, force: false } if agent == "codex"));
-
-        let claude = parse_args(os_args(&["uninstall", "claude"])).unwrap();
-        assert!(matches!(claude, Command::Uninstall { agent, force: false } if agent == "claude"));
-
-        let opencode = parse_args(os_args(&["uninstall", "opencode"])).unwrap();
-        assert!(
-            matches!(opencode, Command::Uninstall { agent, force: false } if agent == "opencode")
-        );
-
-        let kimi = parse_args(os_args(&["uninstall", "kimi-code"])).unwrap();
-        assert!(matches!(kimi, Command::Uninstall { agent, force: false } if agent == "kimi-code"));
-
-        let pi = parse_args(os_args(&["uninstall", "pi"])).unwrap();
-        assert!(matches!(pi, Command::Uninstall { agent, force: false } if agent == "pi"));
+        for target in [
+            "antigravity",
+            "claude",
+            "codebuddy",
+            "coder",
+            "codex",
+            "cursor",
+            "kimi-code",
+            "kiro",
+            "lingcode",
+            "marvis",
+            "opencode",
+            "pi",
+            "qoder",
+            "qoderwork",
+            "trae",
+            "vscode",
+            "workbuddy",
+        ] {
+            let command = parse_args(os_args(&["uninstall", target])).unwrap();
+            assert!(
+                matches!(command, Command::Uninstall { agent, force: false } if agent == target)
+            );
+        }
     }
 
     #[test]
@@ -1224,8 +1304,8 @@ Commands:
   config     View and modify Sentra configuration
   model      View and modify model providers
   skill      Install skills
-  install    Install or update an agent CLI
-  uninstall  Uninstall an agent CLI
+  install    Install or update an agent
+  uninstall  Uninstall an agent
 
 Options:
   -v, --version   Show version
@@ -1246,8 +1326,8 @@ Use 'sentra <command> --help' for command-specific usage.",
   config     查看和修改 Sentra 配置
   model      查看和修改模型供应商
   skill      安装技能
-  install    安装或更新 Agent CLI
-  uninstall  卸载 Agent CLI
+  install    安装或更新 Agent
+  uninstall  卸载 Agent
 
 选项:
   -v, --version   显示版本
@@ -1273,10 +1353,18 @@ pub(crate) fn print_install_help() {
         t(
             "\
 Usage:
-  sentra install <codex|claude|kimi-code|opencode|pi>
+  sentra install <agent>
 
 Description:
-  Install an agent CLI. If it is already installed, update it.
+  Install an agent. If it is already installed, update it.
+
+Agents:
+  All platforms:  codebuddy, codex, kimi-code, opencode, pi
+  Windows WinGet: antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  macOS:          antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  Linux:          antigravity, claude, coder, cursor, kiro, qoder, trae, vscode
+  Platform blocked: qoderwork, workbuddy (Linux)
+  Source blocked on every platform: lingcode, marvis
 
 Options:
   -h, --help  Show help
@@ -1284,15 +1372,21 @@ Options:
 Examples:
   sentra install codex
   sentra install claude
-  sentra install kimi-code
-  sentra install opencode
-  sentra install pi",
+  sentra install workbuddy",
             "\
 用法:
-  sentra install <codex|claude|kimi-code|opencode|pi>
+  sentra install <agent>
 
 说明:
-  安装 Agent CLI；如果已经安装则更新。
+  安装 Agent；如果已经安装则更新。
+
+Agent:
+  全平台:          codebuddy、codex、kimi-code、opencode、pi
+  Windows WinGet: antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  macOS:          antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  Linux:          antigravity、claude、coder、cursor、kiro、qoder、trae、vscode
+  平台未发布:      qoderwork、workbuddy（Linux）
+  全平台可信来源暂不可用: lingcode、marvis
 
 选项:
   -h, --help  显示帮助
@@ -1300,9 +1394,7 @@ Examples:
 示例:
   sentra install codex
   sentra install claude
-  sentra install kimi-code
-  sentra install opencode
-  sentra install pi"
+  sentra install workbuddy"
         )
     );
 }
@@ -1313,10 +1405,18 @@ pub(crate) fn print_uninstall_help() {
         t(
             "\
 Usage:
-  sentra uninstall <codex|claude|kimi-code|opencode|pi> [--force]
+  sentra uninstall <agent> [--force]
 
 Description:
-  Uninstall an agent CLI. By default, Sentra asks whether to delete local configuration data.
+  Uninstall an agent. By default, Sentra asks whether to delete local configuration data.
+
+Agents:
+  All platforms: codebuddy, codex, kimi-code, opencode, pi
+  Windows:       antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  macOS:         antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  Linux:         antigravity, claude, coder, cursor, kiro, qoder, trae, vscode
+  Platform blocked: qoderwork, workbuddy (Linux)
+  Source blocked on every platform: lingcode, marvis
 
 Options:
   -f, --force  Delete configuration data without asking
@@ -1324,16 +1424,22 @@ Options:
 
 Examples:
   sentra uninstall codex
-  sentra uninstall claude
-  sentra uninstall kimi-code
   sentra uninstall opencode --force
-  sentra uninstall pi",
+  sentra uninstall workbuddy",
             "\
 用法:
-  sentra uninstall <codex|claude|kimi-code|opencode|pi> [--force]
+  sentra uninstall <agent> [--force]
 
 说明:
-  卸载 Agent CLI。默认会询问是否删除本地配置数据。
+  卸载 Agent。默认会询问是否删除本地配置数据。
+
+Agent:
+  全平台:  codebuddy、codex、kimi-code、opencode、pi
+  Windows: antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  macOS:   antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  Linux:   antigravity、claude、coder、cursor、kiro、qoder、trae、vscode
+  平台未发布: qoderwork、workbuddy（Linux）
+  全平台可信来源暂不可用: lingcode、marvis
 
 选项:
   -f, --force  不询问并直接删除配置数据
@@ -1341,10 +1447,8 @@ Examples:
 
 示例:
   sentra uninstall codex
-  sentra uninstall claude
-  sentra uninstall kimi-code
   sentra uninstall opencode --force
-  sentra uninstall pi"
+  sentra uninstall workbuddy"
         )
     );
 }
@@ -1353,10 +1457,10 @@ pub(crate) fn print_list_help() {
     println!("{}", t(
         "\
 Usage:
-  sentra list <skill|mcp|provider|memory|agent|cron|plugin|process> [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
+  sentra list [<skill|mcp|provider|memory|agent|cron|plugin|process>] [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
 
 Description:
-  List discovered Sentra assets or configured agents.
+  List all discovered asset types by default, or one asset type. Use --agent to limit results to matching agents.
 
 Options:
   --home <path>       Read agent homes under this user home
@@ -1366,15 +1470,17 @@ Options:
   -h, --help          Show help
 
 Examples:
+  sentra list
+  sentra list --agent codex-ide
   sentra list skill
   sentra list provider --home ./fixtures/provider/account-home --format json"
     ,
         "\
 用法:
-  sentra list <skill|mcp|provider|memory|agent|cron|plugin|process> [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
+  sentra list [<skill|mcp|provider|memory|agent|cron|plugin|process>] [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
 
 说明:
-  列出发现的 Sentra 资产或已配置的 Agent。
+  默认列出发现的全部资产类型，也可指定一种资产类型；可用 --agent 将结果限制为匹配的 Agent。
 
 选项:
   --home <路径>      从指定用户主目录读取 Agent
@@ -1384,6 +1490,8 @@ Examples:
   -h, --help         显示帮助
 
 示例:
+  sentra list
+  sentra list --agent codex-ide
   sentra list skill
   sentra list provider --home ./fixtures/provider/account-home --format json"
     ));

@@ -319,12 +319,19 @@ fn sentra_list_defaults_to_terminal_format() {
 }
 
 #[test]
-fn sentra_bare_list_defaults_to_agents() {
+fn sentra_bare_list_lists_all_asset_types() {
     let dir = tempfile::tempdir().unwrap();
-    fs::create_dir_all(dir.path().join(".codex")).unwrap();
+    let codex_home = dir.path().join(".codex");
+    write_skill(dir.path(), ".codex", "codex-demo");
+    fs::write(
+        codex_home.join("config.toml"),
+        "[mcp_servers.demo]\ncommand = \"demo-mcp\"\n",
+    )
+    .unwrap();
 
     let output = sentra_command()
         .arg("list")
+        .env("SENTRA_LANG", "en")
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .output()
@@ -336,8 +343,44 @@ fn sentra_bare_list_defaults_to_agents() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Agents"));
-    assert!(stdout.contains("codex"));
+    assert!(stdout.contains("Skills (1)"), "{stdout}");
+    assert!(stdout.contains("MCP Servers (1)"), "{stdout}");
+    assert!(stdout.contains("codex-demo"), "{stdout}");
+    assert!(stdout.contains("demo"), "{stdout}");
+}
+
+#[test]
+fn sentra_bare_list_with_agent_filter_lists_matching_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    write_skill(dir.path(), ".codex", "codex-demo");
+    fs::write(
+        codex_home.join("config.toml"),
+        "[mcp_servers.demo]\ncommand = \"demo-mcp\"\n",
+    )
+    .unwrap();
+    write_skill(dir.path(), ".sentra", "sentra-demo");
+
+    let output = sentra_command()
+        .args(["list", "--agent", "codex", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+
+    assert_eq!(assets.len(), 2, "assets: {assets:?}");
+    assert!(assets.iter().all(|asset| asset["agentName"] == "codex"));
+    assert!(assets.iter().any(|asset| asset["assetType"] == "skill"));
+    assert!(assets.iter().any(|asset| asset["assetType"] == "mcp"));
+    assert!(assets.iter().all(|asset| asset["agentName"] != "sentra"));
 }
 
 #[test]
@@ -722,6 +765,7 @@ fn sentra_list_provider_collects_claude_oauth_account_without_tokens() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains(access_token));
     assert!(!stdout.contains(refresh_token));
+    assert!(!stdout.contains("sk-claude-fixture"));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let assets = value.as_array().unwrap();
     let providers = assets[0]["data"].as_array().unwrap();
@@ -730,6 +774,7 @@ fn sentra_list_provider_collects_claude_oauth_account_without_tokens() {
 
     assert_eq!(gateway["name"], "claude-gateway.example.test");
     assert_eq!(gateway["baseUrl"], "https://claude-gateway.example.test");
+    assert!(gateway["apiKey"].as_str().unwrap().contains("****"));
     assert_eq!(gateway["models"][0]["id"], "claude-fixture-sonnet");
     assert_eq!(provider["providerType"], "claude_account");
     assert_eq!(provider["name"], "Claude User");
@@ -750,6 +795,36 @@ fn sentra_list_provider_collects_claude_oauth_account_without_tokens() {
     assert_eq!(provider["account"]["profileFetchedAt"], 1783587822367u64);
     assert!(provider["baseUrl"].is_null());
     assert!(provider["apiKey"].is_null());
+}
+
+#[test]
+fn sentra_list_provider_masks_sentra_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let sentra_home = dir.path().join(".sentra");
+    fs::create_dir_all(&sentra_home).unwrap();
+    fs::write(
+        sentra_home.join("config.json"),
+        r#"{"llm":{"api":"https://api.example.test/v1","key":"sk-sentra-list-secret","model":"gpt-test"}}"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "provider", "--agent", "sentra", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("sk-sentra-list-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let provider = &value.as_array().unwrap()[0]["data"][0];
+    assert!(provider["apiKey"].as_str().unwrap().contains("****"));
 }
 
 #[test]
@@ -799,16 +874,14 @@ model = "kimi-k2-cli"
 
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0]["agentName"], "kimi-code");
-    assert_eq!(assets[0]["data"][0]["providerId"], "kimi");
-    assert_eq!(
-        assets[0]["data"][0]["baseUrl"],
-        "https://api.kimi.com/coding/v1"
-    );
+    assert_eq!(assets[0]["data"][0]["name"], "managed:kimi-code");
+    assert!(assets[0]["data"][0]["baseUrl"].is_null());
+    assert!(assets[0]["data"][0]["protocol"].is_null());
     assert_eq!(assets[0]["data"][0]["models"][0]["id"], "kimi-k2-cli");
 }
 
 #[test]
-fn kimi_code_sentra_list_provider_terminal_uses_catalog_name() {
+fn kimi_code_sentra_list_provider_terminal_uses_config_provider_name() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".kimi-code");
     fs::create_dir_all(&home).unwrap();
@@ -841,12 +914,11 @@ model = "kimi-k2-cli"
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Kimi For Coding"), "{stdout}");
+    assert!(stdout.contains("managed:kimi-code"), "{stdout}");
     assert!(
-        stdout.contains("https://api.kimi.com/coding/v1"),
+        !stdout.contains("https://api.kimi.com/coding/v1"),
         "{stdout}"
     );
-    assert!(!stdout.contains("managed:kimi-code"), "{stdout}");
     assert!(!stdout.contains("sk-kimi-cli-secret"), "{stdout}");
 }
 
@@ -975,6 +1047,47 @@ fn sentra_list_unknown_agent_filter_returns_empty_json() {
 
     let output = sentra_command()
         .args(["list", "skill", "--agent", "missing", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn sentra_list_agent_filter_accepts_official_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    write_skill(dir.path(), ".qoder", "qoder-demo");
+
+    let output = sentra_command()
+        .args(["list", "skill", "--agent", "qoder-cli", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0]["agentName"], "qoder");
+}
+
+#[test]
+fn sentra_list_agent_filter_rejects_unofficial_qoder_misspelling() {
+    let dir = tempfile::tempdir().unwrap();
+    write_skill(dir.path(), ".qoder", "qoder-demo");
+
+    let output = sentra_command()
+        .args(["list", "skill", "--agent", "qocder-cli", "--format", "json"])
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .output()
@@ -2356,8 +2469,8 @@ fn sentra_config_get_masks_intel_keys_and_lists_rule_files() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[INFO] View configuration"));
     assert!(stdout.contains("Intel"));
-    assert!(stdout.contains("intel.chaitin_key = chai****3456"));
-    assert!(stdout.contains("intel.threatbook_key = thre****cdef"));
+    assert!(stdout.contains("intel.chaitin_key = ****"));
+    assert!(stdout.contains("intel.threatbook_key = ****"));
     assert!(stdout.contains("File Hash Lists"));
     assert!(stdout.contains("white.sha256.txt"));
     assert!(stdout.contains("Config:"));
@@ -2605,12 +2718,36 @@ fn sentra_list_help_prints_usage() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("sentra list <skill|mcp|provider|memory|agent|cron|plugin|process>"));
+    assert!(stdout.contains("sentra list [<skill|mcp|provider|memory|agent|cron|plugin|process>]"));
     assert!(stdout.contains("--home <path>") || stdout.contains("--home <路径>"));
     assert!(stdout.contains("--agent <name>") || stdout.contains("--agent <名称>"));
     assert!(stdout.contains("Examples:") || stdout.contains("示例:"));
     assert!(!stdout.contains("sentra scan <skill|cron|memory|provider>"));
     assert!(!stdout.contains("sentra skill add <url>"));
+}
+
+#[test]
+fn sentra_agent_install_help_lists_cross_platform_support() {
+    for command in ["install", "uninstall"] {
+        let output = sentra_command()
+            .args([command, "--help"])
+            .env("SENTRA_LANG", "en")
+            .output()
+            .unwrap();
+
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.lines().any(|line| {
+            line.trim_start().starts_with("macOS:")
+                && line.contains("antigravity, claude, coder, cursor, kiro, qoder")
+        }));
+        assert!(stdout.lines().any(|line| {
+            line.trim_start().starts_with("Linux:")
+                && line.contains("antigravity, claude, coder, cursor, kiro, qoder, trae, vscode")
+        }));
+        assert!(stdout.contains("qoderwork, workbuddy (Linux)"));
+    }
 }
 
 #[test]

@@ -11,6 +11,17 @@ use serde_json::Value;
 use crate::cli::args::{ListResource, OutputOptions};
 use crate::cli::i18n::t;
 use crate::cli::output::write_output;
+use crate::core::agent_filter::agent_matches;
+
+const ALL_ASSET_TYPES: &[AssetType] = &[
+    AssetType::Skill,
+    AssetType::Mcp,
+    AssetType::Provider,
+    AssetType::Memory,
+    AssetType::Cron,
+    AssetType::Plugin,
+    AssetType::Process,
+];
 
 pub(crate) async fn run(
     resource: ListResource,
@@ -19,34 +30,52 @@ pub(crate) async fn run(
     output: OutputOptions,
 ) -> SentraResult<()> {
     match resource {
+        ListResource::All => write_output(
+            asset_records(home, agent_filter, ALL_ASSET_TYPES).await?,
+            &output,
+            "Assets",
+        ),
         ListResource::Agent => write_output(agent_records(home, agent_filter)?, &output, "Agents"),
-        ListResource::Asset(asset_type) => {
-            let mut assets = Vec::new();
-            for agent in discover_agents(home) {
-                if agent_filter.is_some_and(|filter| filter != agent.name()) {
+        ListResource::Asset(asset_type) => write_output(
+            asset_records(home, agent_filter, &[asset_type]).await?,
+            &output,
+            "Assets",
+        ),
+    }
+}
+
+async fn asset_records(
+    home: &Path,
+    agent_filter: Option<&str>,
+    asset_types: &[AssetType],
+) -> SentraResult<Vec<AssetRecord>> {
+    let agents = discover_agents(home)
+        .into_iter()
+        .filter(|agent| agent_filter.is_none_or(|filter| agent_matches(filter, agent.name())))
+        .collect::<Vec<_>>();
+    let mut records = Vec::new();
+    for &requested_type in asset_types {
+        for agent in &agents {
+            let agent_title = agent.title().to_string();
+            for asset in agent.get_assets(requested_type)? {
+                let asset_type = asset.asset_type();
+                let data = serde_json::to_value(asset.data_async().await?)
+                    .map_err(|err| SentraError::Message(err.to_string()))?;
+                if data.as_array().is_some_and(|items| items.is_empty()) {
                     continue;
                 }
-                let agent_title = agent.title().to_string();
-                for asset in agent.get_assets(asset_type)? {
-                    let asset_type = asset.asset_type();
-                    let data = serde_json::to_value(asset.data_async().await?)
-                        .map_err(|err| SentraError::Message(err.to_string()))?;
-                    if data.as_array().is_some_and(|items| items.is_empty()) {
-                        continue;
-                    }
-                    assets.push(AssetRecord {
-                        asset_type,
-                        kind: asset_type,
-                        agent_name: asset.agent_name().to_string(),
-                        agent_title: agent_title.clone(),
-                        agent_home: asset.agent_home().to_path_buf(),
-                        data,
-                    });
-                }
+                records.push(AssetRecord {
+                    asset_type,
+                    kind: asset_type,
+                    agent_name: asset.agent_name().to_string(),
+                    agent_title: agent_title.clone(),
+                    agent_home: asset.agent_home().to_path_buf(),
+                    data,
+                });
             }
-            write_output(assets, &output, "Assets")
         }
     }
+    Ok(records)
 }
 
 pub(crate) fn resolve_home(home: Option<&Path>) -> SentraResult<PathBuf> {
@@ -72,7 +101,7 @@ fn agent_records(home: &Path, agent_filter: Option<&str>) -> SentraResult<Vec<Ag
     let mut records = Vec::new();
     for agent in discover_agents(home)
         .into_iter()
-        .filter(|agent| agent_filter.is_none_or(|filter| filter == agent.name()))
+        .filter(|agent| agent_filter.is_none_or(|filter| agent_matches(filter, agent.name())))
     {
         records.push(AgentRecord {
             name: agent.name().to_string(),

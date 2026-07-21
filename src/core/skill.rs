@@ -27,6 +27,7 @@ use crate::cli::args::ScanChecker;
 use crate::cli::feedback::{self, Status};
 use crate::cli::i18n::t;
 use crate::cli::output::print_json;
+use crate::core::agent_filter::agent_matches;
 use crate::core::scan_support::{
     RuleLoadOutput, build_scan_options, checker_selection, emit_scan_progress,
     finish_scan_progress, load_scanner_rules,
@@ -1751,10 +1752,6 @@ fn current_home() -> SentraResult<PathBuf> {
             .to_string(),
         )
     })
-}
-
-fn agent_matches(filter: &str, agent_name: &str) -> bool {
-    filter == agent_name || (filter == "claude" && agent_name.starts_with("claude-"))
 }
 
 #[derive(Clone)]

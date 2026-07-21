@@ -14,6 +14,7 @@ use crate::cli::args::{OutputOptions, ScanChecker, ScanResource};
 use crate::cli::feedback::{self, Status};
 use crate::cli::i18n::t;
 use crate::cli::output::write_output;
+use crate::core::agent_filter::agent_matches;
 use crate::core::model;
 use crate::core::scan_support::{
     RuleLoadOutput, build_scan_options_with_cache, checker_selection, emit_scan_progress,
@@ -357,10 +358,6 @@ fn current_home() -> SentraResult<std::path::PathBuf> {
             .to_string(),
         )
     })
-}
-
-fn agent_matches(filter: &str, agent_name: &str) -> bool {
-    filter == agent_name || (filter == "claude" && agent_name.starts_with("claude-"))
 }
 
 fn should_prompt_for_sentra_model(

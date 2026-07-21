@@ -7,6 +7,9 @@
 
 
 
+claude app 没有采集provider
+
+
 
 2. 安装 mcp
 3. 安装 插件

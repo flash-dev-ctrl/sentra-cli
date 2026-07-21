@@ -124,11 +124,28 @@ fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
     let Some(items) = value.as_array() else {
         return format_generic("Assets", value);
     };
-    let asset_type = items
-        .first()
-        .and_then(|item| item.get("assetType"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("asset");
+    if items.is_empty() {
+        return format_generic("Assets", value);
+    }
+    items
+        .chunk_by(|left, right| left.get("assetType") == right.get("assetType"))
+        .map(|items| {
+            let asset_type = items
+                .first()
+                .and_then(|item| item.get("assetType"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("asset");
+            format_asset_type(asset_type, items, semantic_symbols)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_asset_type(
+    asset_type: &str,
+    items: &[serde_json::Value],
+    semantic_symbols: bool,
+) -> String {
     match asset_type {
         "provider" => format_provider_assets(items, semantic_symbols),
         "skill" => format_skill_assets(items, semantic_symbols),
@@ -149,7 +166,7 @@ fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
         "cron" => format_cron_assets(items, semantic_symbols),
         "plugin" => format_plugin_assets(items, semantic_symbols),
         "process" => format_process_assets(items, semantic_symbols),
-        _ => format_generic("Assets", value),
+        _ => format_generic("Assets", &serde_json::Value::Array(items.to_vec())),
     }
 }
 

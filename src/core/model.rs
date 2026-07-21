@@ -30,6 +30,7 @@ use crate::cli::args::{ModelAction, OutputOptions};
 use crate::cli::feedback::{self, Status};
 use crate::cli::i18n::{t, yes_no};
 use crate::cli::output::write_output;
+use crate::core::agent_filter::canonical_agent_target;
 use crate::tui::theme;
 
 pub(crate) async fn run(action: ModelAction) -> SentraResult<()> {
@@ -361,8 +362,9 @@ fn mutate_provider_at(
         &dyn sentra_lib::interfaces::ErasedAsset,
     ) -> SentraResult<sentra_lib::interfaces::AssetMutationResult>,
 ) -> SentraResult<()> {
+    let target = canonical_agent_target(agent_name);
     for agent in discover_agents(home) {
-        if agent.name() != agent_name {
+        if target != Some(agent.name()) {
             continue;
         }
         for asset in agent.get_assets(AssetType::Provider)? {
@@ -1978,6 +1980,22 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn claude_alias_mutates_only_cli_provider() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        std::fs::create_dir_all(home.path().join("AppData/Local/Claude")).unwrap();
+        let mut seen = Vec::new();
+
+        mutate_provider_at(home.path(), "claude", |asset| {
+            seen.push(asset.agent_name().to_string());
+            Ok(sentra_lib::interfaces::AssetMutationResult::changed())
+        })
+        .unwrap();
+
+        assert_eq!(seen, ["claude-cli"]);
     }
 
     fn assert_cell_fg(backend: &TestBackend, text: &str, color: Color) {

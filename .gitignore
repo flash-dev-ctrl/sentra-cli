@@ -3,3 +3,4 @@
 /install.cmd
 /openai-codex/
 .cargo-home/
+.example/
