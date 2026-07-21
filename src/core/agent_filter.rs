@@ -51,7 +51,10 @@ mod tests {
     #[test]
     fn claude_single_target_resolves_to_cli() {
         assert_eq!(canonical_agent_target("claude"), Some("claude-cli"));
-        assert_eq!(canonical_agent_target("claude-ide"), Some("claude-code-ide"));
+        assert_eq!(
+            canonical_agent_target("claude-ide"),
+            Some("claude-code-ide")
+        );
         assert_eq!(canonical_agent_target("anti-gravity"), Some("antigravity"));
     }
 }

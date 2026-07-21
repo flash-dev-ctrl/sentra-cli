@@ -288,7 +288,10 @@ fn catalog_display_name_for_language(
 }
 
 fn non_empty_string_value(value: &serde_json::Value) -> Option<&str> {
-    value.as_str().map(str::trim).filter(|value| !value.is_empty())
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn normalized_provider_key(value: &str) -> String {

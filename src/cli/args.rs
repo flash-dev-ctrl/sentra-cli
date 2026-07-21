@@ -636,8 +636,14 @@ mod tests {
 
     #[test]
     fn list_options_with_agent_without_resource_parse_as_all_assets() {
-        let command = parse_args(os_args(&["list", "--agent", "codex-ide", "--format", "json"]))
-            .unwrap();
+        let command = parse_args(os_args(&[
+            "list",
+            "--agent",
+            "codex-ide",
+            "--format",
+            "json",
+        ]))
+        .unwrap();
 
         assert!(matches!(
             command,
