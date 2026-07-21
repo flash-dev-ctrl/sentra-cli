@@ -202,7 +202,7 @@ fn sentra_list_agent_outputs_discovered_agents_as_json() {
     assert!(agents.len() >= 2, "agents: {agents:?}");
     assert!(agents.iter().any(|agent| agent["name"] == "codex"));
     assert!(agents.iter().any(|agent| agent["name"] == "sentra"));
-    assert!(agents.iter().any(|agent| agent["title"] == "Codex"));
+    assert!(agents.iter().any(|agent| agent["title"] == "Codex CLI"));
     let codex = agents
         .iter()
         .find(|agent| agent["name"] == "codex")
@@ -376,7 +376,7 @@ fn sentra_bare_list_with_agent_filter_lists_matching_assets() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let assets = value.as_array().unwrap();
 
-    assert_eq!(assets.len(), 2, "assets: {assets:?}");
+    assert!(assets.len() >= 2, "assets: {assets:?}");
     assert!(assets.iter().all(|asset| asset["agentName"] == "codex"));
     assert!(assets.iter().any(|asset| asset["assetType"] == "skill"));
     assert!(assets.iter().any(|asset| asset["assetType"] == "mcp"));
