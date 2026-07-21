@@ -8,7 +8,7 @@ use sentra_lib::{SentraError, SentraResult};
 use unicode_width::UnicodeWidthStr;
 
 use crate::cli::args::{OutputFormat, OutputOptions};
-use crate::cli::i18n::{t, yes_no};
+use crate::cli::i18n::{Language, current, t, yes_no};
 use crate::tui::theme::{AnsiStyle, paint, severity_ansi_style};
 
 const PROVIDER_CATALOG_JSON: &str = include_str!("../catelogs/providers.json");
@@ -124,11 +124,28 @@ fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
     let Some(items) = value.as_array() else {
         return format_generic("Assets", value);
     };
-    let asset_type = items
-        .first()
-        .and_then(|item| item.get("assetType"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("asset");
+    if items.is_empty() {
+        return format_generic("Assets", value);
+    }
+    items
+        .chunk_by(|left, right| left.get("assetType") == right.get("assetType"))
+        .map(|items| {
+            let asset_type = items
+                .first()
+                .and_then(|item| item.get("assetType"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("asset");
+            format_asset_type(asset_type, items, semantic_symbols)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_asset_type(
+    asset_type: &str,
+    items: &[serde_json::Value],
+    semantic_symbols: bool,
+) -> String {
     match asset_type {
         "provider" => format_provider_assets(items, semantic_symbols),
         "skill" => format_skill_assets(items, semantic_symbols),
@@ -149,7 +166,7 @@ fn format_assets(value: &serde_json::Value, semantic_symbols: bool) -> String {
         "cron" => format_cron_assets(items, semantic_symbols),
         "plugin" => format_plugin_assets(items, semantic_symbols),
         "process" => format_process_assets(items, semantic_symbols),
-        _ => format_generic("Assets", value),
+        _ => format_generic("Assets", &serde_json::Value::Array(items.to_vec())),
     }
 }
 
@@ -209,12 +226,12 @@ fn provider_data_catalog_name(provider_data: &serde_json::Value) -> Option<Strin
     let provider = provider_data;
     provider
         .get("baseUrl")
-        .and_then(|value| value.as_str())
+        .and_then(non_empty_string_value)
         .and_then(catalog_name_by_base_url)
         .or_else(|| {
             ["providerId", "rawProviderId"]
                 .iter()
-                .filter_map(|key| provider.get(*key).and_then(|value| value.as_str()))
+                .filter_map(|key| provider.get(*key).and_then(non_empty_string_value))
                 .find_map(catalog_name_by_id)
         })
 }
@@ -222,47 +239,30 @@ fn provider_data_catalog_name(provider_data: &serde_json::Value) -> Option<Strin
 fn catalog_name_by_id(id: &str) -> Option<String> {
     let id = normalized_provider_key(id);
     catalog_providers()?.iter().find_map(|provider| {
-        let provider_id = provider.get("id").and_then(|value| value.as_str());
-        let aliases = provider
-            .get("aliases")
-            .and_then(|value| value.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|value| value.as_str());
-        provider_id
-            .into_iter()
-            .chain(aliases)
-            .any(|value| normalized_provider_key(value) == id)
-            .then(|| catalog_display_name(provider))
-            .flatten()
+        provider
+            .get("id")
+            .and_then(non_empty_string_value)
+            .filter(|value| normalized_provider_key(value) == id)
+            .and_then(|_| catalog_display_name(provider))
     })
 }
 
 fn catalog_name_by_base_url(base_url: &str) -> Option<String> {
     let base_url = normalized_provider_url(base_url);
+    if base_url.is_empty() {
+        return None;
+    }
     catalog_providers()?.iter().find_map(|provider| {
-        let provider_base_url = provider.get("baseUrl").and_then(|value| value.as_str());
-        let endpoints = provider
-            .get("endpoints")
-            .and_then(|value| value.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|endpoint| endpoint.get("baseUrl").and_then(|value| value.as_str()));
-        provider_base_url
-            .into_iter()
-            .chain(endpoints)
-            .any(|value| normalized_provider_url(value) == base_url)
-            .then(|| catalog_display_name(provider))
-            .flatten()
+        provider
+            .get("baseUrl")
+            .and_then(non_empty_string_value)
+            .filter(|value| normalized_provider_url(value) == base_url)
+            .and_then(|_| catalog_display_name(provider))
     })
 }
 
 fn catalog_display_name(provider: &serde_json::Value) -> Option<String> {
-    provider
-        .get("displayName")
-        .or_else(|| provider.get("name"))
-        .and_then(|value| value.as_str())
-        .map(ToString::to_string)
+    catalog_display_name_for_language(provider, current())
 }
 
 fn catalog_providers() -> Option<&'static Vec<serde_json::Value>> {
@@ -272,6 +272,26 @@ fn catalog_providers() -> Option<&'static Vec<serde_json::Value>> {
             serde_json::from_str(PROVIDER_CATALOG_JSON).expect("embedded provider catalog is valid")
         })
         .as_array()
+}
+
+fn catalog_display_name_for_language(
+    provider: &serde_json::Value,
+    language: Language,
+) -> Option<String> {
+    let keys = match language {
+        Language::En => ["name", "nameZh"],
+        Language::Zh => ["nameZh", "name"],
+    };
+    keys.iter()
+        .find_map(|key| provider.get(*key).and_then(non_empty_string_value))
+        .map(ToString::to_string)
+}
+
+fn non_empty_string_value(value: &serde_json::Value) -> Option<&str> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn normalized_provider_key(value: &str) -> String {
@@ -1476,6 +1496,41 @@ mod tests {
         assert!(output.contains("kimi-code/kimi-k2-cli"), "{output}");
         assert!(output.contains("2"), "{output}");
         assert!(!output.contains("kimi-code/kimi-unused"), "{output}");
+    }
+
+    #[test]
+    fn provider_catalog_lookup_ignores_blank_base_url() {
+        assert_eq!(catalog_name_by_base_url(""), None);
+    }
+
+    #[test]
+    fn provider_catalog_lookup_uses_id_when_provider_base_url_is_blank() {
+        let provider = serde_json::json!({
+            "providerId": "openai-official",
+            "baseUrl": ""
+        });
+
+        assert_eq!(
+            provider_data_catalog_name(&provider).as_deref(),
+            Some("OpenAI Official")
+        );
+    }
+
+    #[test]
+    fn provider_catalog_display_name_prefers_new_schema_fields() {
+        let provider = serde_json::json!({
+            "name": "New Provider",
+            "nameZh": "新供应商"
+        });
+
+        assert_eq!(
+            catalog_display_name_for_language(&provider, Language::En).as_deref(),
+            Some("New Provider")
+        );
+        assert_eq!(
+            catalog_display_name_for_language(&provider, Language::Zh).as_deref(),
+            Some("新供应商")
+        );
     }
 
     #[test]

@@ -676,23 +676,24 @@ fn is_secret_key(key: &str) -> bool {
 }
 
 fn mask_secret(value: &str) -> String {
-    let chars = value.chars().collect::<Vec<_>>();
-    if chars.len() <= 8 {
-        return format!("{}****", chars.iter().take(2).collect::<String>());
+    if value.is_empty() {
+        String::new()
+    } else {
+        "****".to_string()
     }
-    format!(
-        "{}****{}",
-        chars.iter().take(4).collect::<String>(),
-        chars
-            .iter()
-            .skip(chars.len().saturating_sub(4))
-            .collect::<String>()
-    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::initialize_at;
+    use super::{initialize_at, mask_secret};
+
+    #[test]
+    fn masks_short_and_long_secrets_completely() {
+        assert_eq!(mask_secret("a"), "****");
+        assert_eq!(mask_secret("ab"), "****");
+        assert_eq!(mask_secret("sk-long-secret"), "****");
+        assert_eq!(mask_secret(""), "");
+    }
 
     #[test]
     fn creates_empty_config_without_rules() {
