@@ -269,7 +269,9 @@ fn is_install_target(agent: &str) -> bool {
             | "codex"
             | "codex-cli"
             | "cursor"
+            | "kimi"
             | "kimi-code"
+            | "kimi-cli"
             | "kiro"
             | "lingcode"
             | "marvis"
@@ -682,7 +684,9 @@ mod tests {
             "codex",
             "codex-cli",
             "cursor",
+            "kimi",
             "kimi-code",
+            "kimi-cli",
             "kiro",
             "lingcode",
             "marvis",
@@ -717,7 +721,9 @@ mod tests {
             "codex",
             "codex-cli",
             "cursor",
+            "kimi",
             "kimi-code",
+            "kimi-cli",
             "kiro",
             "lingcode",
             "marvis",
@@ -1370,12 +1376,13 @@ Description:
   Install an agent. If it is already installed, update it.
 
 Agents:
-  All platforms:  codebuddy, codex-cli, kimi-code, opencode, pi
+  All platforms:  codebuddy, codex-cli, kimi-cli, opencode, pi
   Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
   macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
   Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder, trae, vscode
   Platform blocked: qoderwork, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
+  Aliases: kimi, kimi-code -> kimi-cli
 
 Options:
   -h, --help  Show help
@@ -1392,12 +1399,13 @@ Examples:
   安装 Agent；如果已经安装则更新。
 
 Agent:
-  全平台:          codebuddy、codex-cli、kimi-code、opencode、pi
+  全平台:          codebuddy、codex-cli、kimi-cli、opencode、pi
   Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
   macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
   Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder、trae、vscode
   平台未发布:      qoderwork、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
+  别名: kimi、kimi-code -> kimi-cli
 
 选项:
   -h, --help  显示帮助
@@ -1422,12 +1430,13 @@ Description:
   Uninstall an agent. By default, Sentra asks whether to delete local configuration data.
 
 Agents:
-  All platforms: codebuddy, codex-cli, kimi-code, opencode, pi
+  All platforms: codebuddy, codex-cli, kimi-cli, opencode, pi
   Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
   macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
   Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder, trae, vscode
   Platform blocked: qoderwork, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
+  Aliases: kimi, kimi-code -> kimi-cli
 
 Options:
   -f, --force  Delete configuration data without asking
@@ -1445,12 +1454,13 @@ Examples:
   卸载 Agent。默认会询问是否删除本地配置数据。
 
 Agent:
-  全平台:  codebuddy、codex-cli、kimi-code、opencode、pi
+  全平台:  codebuddy、codex-cli、kimi-cli、opencode、pi
   Windows: antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
   macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
   Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder、trae、vscode
   平台未发布: qoderwork、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
+  别名: kimi、kimi-code -> kimi-cli
 
 选项:
   -f, --force  不询问并直接删除配置数据

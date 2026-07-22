@@ -1470,7 +1470,7 @@ mod tests {
         let value = serde_json::json!([
             {
                 "assetType": "provider",
-                "agentName": "kimi-code",
+                "agentName": "kimi-cli",
                 "data": [
                     {
                         "name": "managed:kimi-code",

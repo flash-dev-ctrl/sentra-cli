@@ -16,6 +16,8 @@ fn canonical_agent_filter(filter: &str) -> Option<&str> {
         "codex" => Some("codex-cli"),
         "codex-ide" => Some("codex-cli-ide"),
         "claude-ide" | "claude-code-ide" => Some("claude-cli-ide"),
+        "kimi" | "kimi-code" => Some("kimi-cli"),
+        "kimi-ide" | "kimi-code-ide" => Some("kimi-cli-ide"),
         "anti-gravity" => Some("antigravity"),
         "kiro-cli" => Some("kiro"),
         "qoder-cli" | "qodercli" => Some("qoder"),
@@ -40,6 +42,11 @@ mod tests {
         assert!(agent_matches("claude-ide", "claude-cli-ide"));
         assert!(agent_matches("claude-code-ide", "claude-cli-ide"));
         assert!(agent_matches("claude-cli-ide", "claude-cli-ide"));
+        assert!(agent_matches("kimi", "kimi-cli"));
+        assert!(agent_matches("kimi-code", "kimi-cli"));
+        assert!(agent_matches("kimi-ide", "kimi-cli-ide"));
+        assert!(agent_matches("kimi-code-ide", "kimi-cli-ide"));
+        assert!(agent_matches("kimi-cli-ide", "kimi-cli-ide"));
         assert!(agent_matches("anti-gravity", "antigravity"));
         assert!(agent_matches("kiro-cli", "kiro"));
         assert!(agent_matches("qoder-cli", "qoder"));
@@ -67,5 +74,8 @@ mod tests {
             Some("claude-cli-ide")
         );
         assert_eq!(canonical_agent_target("anti-gravity"), Some("antigravity"));
+        assert_eq!(canonical_agent_target("kimi"), Some("kimi-cli"));
+        assert_eq!(canonical_agent_target("kimi-code"), Some("kimi-cli"));
+        assert_eq!(canonical_agent_target("kimi-ide"), Some("kimi-cli-ide"));
     }
 }

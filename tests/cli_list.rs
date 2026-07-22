@@ -223,9 +223,23 @@ fn sentra_list_agent_outputs_discovered_agents_as_json() {
 }
 
 #[test]
-fn kimi_code_sentra_list_agent_outputs_discovered_agent() {
+fn kimi_surfaces_sentra_list_agent_outputs_canonical_names() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".kimi-code")).unwrap();
+    fs::create_dir_all(
+        dir.path()
+            .join("AppData")
+            .join("Roaming")
+            .join("kimi-desktop"),
+    )
+    .unwrap();
+    let extensions = dir.path().join(".vscode").join("extensions");
+    fs::create_dir_all(&extensions).unwrap();
+    fs::write(
+        extensions.join("extensions.json"),
+        r#"[{"identifier":{"id":"moonshot-ai.kimi-code"},"version":"0.6.4"}]"#,
+    )
+    .unwrap();
 
     let output = sentra_command()
         .args(["list", "agent", "--format", "json"])
@@ -243,8 +257,8 @@ fn kimi_code_sentra_list_agent_outputs_discovered_agent() {
     let agents = value.as_array().unwrap();
     let kimi = agents
         .iter()
-        .find(|agent| agent["name"] == "kimi-code")
-        .expect("missing kimi-code");
+        .find(|agent| agent["name"] == "kimi-cli")
+        .expect("missing kimi-cli");
 
     assert_eq!(kimi["title"], "Kimi Code");
     assert!(
@@ -254,6 +268,14 @@ fn kimi_code_sentra_list_agent_outputs_discovered_agent() {
             .replace('\\', "/")
             .ends_with("/.kimi-code")
     );
+    assert!(
+        agents
+            .iter()
+            .any(|agent| { agent["name"] == "kimi-app" && agent["title"] == "Kimi App" })
+    );
+    assert!(agents.iter().any(|agent| {
+        agent["name"] == "kimi-cli-ide" && agent["title"] == "Kimi Code IDE Extension"
+    }));
 }
 
 #[test]
@@ -835,7 +857,7 @@ fn sentra_list_provider_masks_sentra_api_key() {
 }
 
 #[test]
-fn kimi_code_sentra_list_provider_outputs_json_without_raw_api_key() {
+fn kimi_code_alias_lists_canonical_cli_provider_without_raw_api_key() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".kimi-code");
     fs::create_dir_all(&home).unwrap();
@@ -880,7 +902,7 @@ model = "kimi-k2-cli"
     let assets = value.as_array().unwrap();
 
     assert_eq!(assets.len(), 1);
-    assert_eq!(assets[0]["agentName"], "kimi-code");
+    assert_eq!(assets[0]["agentName"], "kimi-cli");
     assert_eq!(assets[0]["data"][0]["name"], "managed:kimi-code");
     assert!(assets[0]["data"][0]["baseUrl"].is_null());
     assert!(assets[0]["data"][0]["protocol"].is_null());
@@ -888,7 +910,7 @@ model = "kimi-k2-cli"
 }
 
 #[test]
-fn kimi_code_sentra_list_provider_terminal_uses_config_provider_name() {
+fn kimi_cli_sentra_list_provider_terminal_uses_config_provider_name() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".kimi-code");
     fs::create_dir_all(&home).unwrap();
@@ -909,7 +931,7 @@ model = "kimi-k2-cli"
     .unwrap();
 
     let output = sentra_command()
-        .args(["list", "provider", "--agent", "kimi-code"])
+        .args(["list", "provider", "--agent", "kimi-cli"])
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .output()
@@ -1106,7 +1128,7 @@ fn sentra_list_agent_filter_rejects_unofficial_qoder_misspelling() {
 }
 
 #[test]
-fn kimi_code_sentra_list_mcp_outputs_json() {
+fn kimi_cli_sentra_list_mcp_outputs_json() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".kimi-code");
     fs::create_dir_all(&home).unwrap();
@@ -1117,7 +1139,7 @@ fn kimi_code_sentra_list_mcp_outputs_json() {
     .unwrap();
 
     let output = sentra_command()
-        .args(["list", "mcp", "--agent", "kimi-code", "--format", "json"])
+        .args(["list", "mcp", "--agent", "kimi-cli", "--format", "json"])
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .output()
@@ -1132,7 +1154,7 @@ fn kimi_code_sentra_list_mcp_outputs_json() {
     let assets = value.as_array().unwrap();
 
     assert_eq!(assets.len(), 1);
-    assert_eq!(assets[0]["agentName"], "kimi-code");
+    assert_eq!(assets[0]["agentName"], "kimi-cli");
     assert_eq!(assets[0]["data"][0]["name"], "remote");
     assert_eq!(assets[0]["data"][0]["type"], "http");
 }
@@ -1403,7 +1425,7 @@ fn sentra_model_fetches_opencode_provider_models_with_runtime_api_key() {
 }
 
 #[test]
-fn kimi_code_sentra_model_fetches_provider_models_with_runtime_api_key() {
+fn kimi_cli_sentra_model_fetches_provider_models_with_runtime_api_key() {
     let dir = tempfile::tempdir().unwrap();
     let server = run_json_server(r#"{"data":[{"id":"kimi-fresh","name":"Kimi Fresh"}]}"#);
     let home = dir.path().join(".kimi-code");
@@ -1452,14 +1474,14 @@ model = "kimi-configured"
     let models = value.as_array().unwrap();
 
     assert!(models.iter().any(|model| {
-        model["agentName"] == "kimi-code"
+        model["agentName"] == "kimi-cli"
             && model["providerType"] == "gateway"
             && model["model"] == "kimi-configured"
     }));
     assert!(
         models
             .iter()
-            .any(|model| { model["agentName"] == "kimi-code" && model["model"] == "kimi-fresh" })
+            .any(|model| { model["agentName"] == "kimi-cli" && model["model"] == "kimi-fresh" })
     );
 }
 
@@ -1534,7 +1556,7 @@ fn claude_model_set_backs_up_and_optimizes_user_config_for_cli_and_ide() {
 }
 
 #[test]
-fn kimi_code_sentra_model_set_writes_config_toml() {
+fn kimi_cli_sentra_model_set_writes_config_toml() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".kimi-code")).unwrap();
 
@@ -1543,7 +1565,7 @@ fn kimi_code_sentra_model_set_writes_config_toml() {
             "model",
             "set",
             "--agent",
-            "kimi-code",
+            "kimi-cli",
             "--base-url",
             "https://api.kimi.com/coding/v1",
             "--api-key",
@@ -1564,7 +1586,7 @@ fn kimi_code_sentra_model_set_writes_config_toml() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("kimi-code"));
+    assert!(stderr.contains("kimi-cli"));
     assert!(stderr.contains("Base URL: https://api.kimi.com/coding/v1"));
     assert!(stderr.contains("kimi-k2-cli"));
     assert!(!stderr.contains("sk-kimi-set-cli-secret"));
@@ -1581,7 +1603,7 @@ fn kimi_code_sentra_model_set_writes_config_toml() {
 }
 
 #[test]
-fn kimi_code_sentra_model_delete_removes_config_toml_provider() {
+fn kimi_cli_sentra_model_delete_removes_config_toml_provider() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".kimi-code");
     fs::create_dir_all(&home).unwrap();
@@ -1616,7 +1638,7 @@ model = "claude"
             "model",
             "delete",
             "--agent",
-            "kimi-code",
+            "kimi-cli",
             "--base-url",
             "https://api.kimi.com/coding/v1",
         ])
@@ -1631,7 +1653,7 @@ model = "claude"
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("kimi-code"));
+    assert!(stderr.contains("kimi-cli"));
     assert!(stderr.contains("Base URL: https://api.kimi.com/coding/v1"));
 
     let content = fs::read_to_string(home.join("config.toml")).unwrap();
@@ -2028,13 +2050,13 @@ fn sentra_scan_memory_skips_missing_codex_global_state() {
 }
 
 #[test]
-fn kimi_code_scan_memory_returns_no_assets() {
+fn kimi_cli_scan_memory_returns_no_assets() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".kimi-code");
     fs::create_dir_all(&home).unwrap();
 
     let output = sentra_command()
-        .args(["scan", "memory", "--agent", "kimi-code", "--format", "json"])
+        .args(["scan", "memory", "--agent", "kimi-cli", "--format", "json"])
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .output()
