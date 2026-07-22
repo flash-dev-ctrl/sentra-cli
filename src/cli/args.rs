@@ -267,6 +267,7 @@ fn is_install_target(agent: &str) -> bool {
             | "codebuddy"
             | "coder"
             | "codex"
+            | "codex-cli"
             | "cursor"
             | "kimi-code"
             | "kiro"
@@ -639,7 +640,7 @@ mod tests {
         let command = parse_args(os_args(&[
             "list",
             "--agent",
-            "codex-ide",
+            "codex-cli-ide",
             "--format",
             "json",
         ]))
@@ -655,7 +656,7 @@ mod tests {
                     ..
                 },
                 ..
-            } if agent == "codex-ide"
+            } if agent == "codex-cli-ide"
         ));
     }
 
@@ -675,9 +676,11 @@ mod tests {
         for target in [
             "antigravity",
             "claude",
+            "claude-cli",
             "codebuddy",
             "coder",
             "codex",
+            "codex-cli",
             "cursor",
             "kimi-code",
             "kiro",
@@ -708,9 +711,11 @@ mod tests {
         for target in [
             "antigravity",
             "claude",
+            "claude-cli",
             "codebuddy",
             "coder",
             "codex",
+            "codex-cli",
             "cursor",
             "kimi-code",
             "kiro",
@@ -733,8 +738,8 @@ mod tests {
 
     #[test]
     fn uninstall_command_accepts_force_flag() {
-        let long = parse_args(os_args(&["uninstall", "codex", "--force"])).unwrap();
-        assert!(matches!(long, Command::Uninstall { agent, force: true } if agent == "codex"));
+        let long = parse_args(os_args(&["uninstall", "codex-cli", "--force"])).unwrap();
+        assert!(matches!(long, Command::Uninstall { agent, force: true } if agent == "codex-cli"));
 
         let short = parse_args(os_args(&["uninstall", "-f", "opencode"])).unwrap();
         assert!(matches!(short, Command::Uninstall { agent, force: true } if agent == "opencode"));
@@ -779,7 +784,7 @@ mod tests {
             "scan",
             "skill",
             "-a",
-            "codex",
+            "codex-cli",
             "-f",
             "json",
             "--online-ti",
@@ -796,7 +801,7 @@ mod tests {
                     ..
                 },
                 ..
-            } if agents == vec!["codex"]
+            } if agents == vec!["codex-cli"]
                 && enabled_checkers.contains(&ScanChecker::OnlineTi)
         ));
     }
@@ -1365,10 +1370,10 @@ Description:
   Install an agent. If it is already installed, update it.
 
 Agents:
-  All platforms:  codebuddy, codex, kimi-code, opencode, pi
-  Windows WinGet: antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  macOS:          antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  Linux:          antigravity, claude, coder, cursor, kiro, qoder, trae, vscode
+  All platforms:  codebuddy, codex-cli, kimi-code, opencode, pi
+  Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder, trae, vscode
   Platform blocked: qoderwork, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
 
@@ -1376,8 +1381,8 @@ Options:
   -h, --help  Show help
 
 Examples:
-  sentra install codex
-  sentra install claude
+  sentra install codex-cli
+  sentra install claude-cli
   sentra install workbuddy",
             "\
 用法:
@@ -1387,10 +1392,10 @@ Examples:
   安装 Agent；如果已经安装则更新。
 
 Agent:
-  全平台:          codebuddy、codex、kimi-code、opencode、pi
-  Windows WinGet: antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  macOS:          antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  Linux:          antigravity、claude、coder、cursor、kiro、qoder、trae、vscode
+  全平台:          codebuddy、codex-cli、kimi-code、opencode、pi
+  Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder、trae、vscode
   平台未发布:      qoderwork、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
 
@@ -1398,8 +1403,8 @@ Agent:
   -h, --help  显示帮助
 
 示例:
-  sentra install codex
-  sentra install claude
+  sentra install codex-cli
+  sentra install claude-cli
   sentra install workbuddy"
         )
     );
@@ -1417,10 +1422,10 @@ Description:
   Uninstall an agent. By default, Sentra asks whether to delete local configuration data.
 
 Agents:
-  All platforms: codebuddy, codex, kimi-code, opencode, pi
-  Windows:       antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  macOS:         antigravity, claude, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  Linux:         antigravity, claude, coder, cursor, kiro, qoder, trae, vscode
+  All platforms: codebuddy, codex-cli, kimi-code, opencode, pi
+  Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
+  Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder, trae, vscode
   Platform blocked: qoderwork, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
 
@@ -1429,7 +1434,7 @@ Options:
   -h, --help   Show help
 
 Examples:
-  sentra uninstall codex
+  sentra uninstall codex-cli
   sentra uninstall opencode --force
   sentra uninstall workbuddy",
             "\
@@ -1440,10 +1445,10 @@ Examples:
   卸载 Agent。默认会询问是否删除本地配置数据。
 
 Agent:
-  全平台:  codebuddy、codex、kimi-code、opencode、pi
-  Windows: antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  macOS:   antigravity、claude、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  Linux:   antigravity、claude、coder、cursor、kiro、qoder、trae、vscode
+  全平台:  codebuddy、codex-cli、kimi-code、opencode、pi
+  Windows: antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
+  Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder、trae、vscode
   平台未发布: qoderwork、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
 
@@ -1452,7 +1457,7 @@ Agent:
   -h, --help   显示帮助
 
 示例:
-  sentra uninstall codex
+  sentra uninstall codex-cli
   sentra uninstall opencode --force
   sentra uninstall workbuddy"
         )
@@ -1477,7 +1482,7 @@ Options:
 
 Examples:
   sentra list
-  sentra list --agent codex-ide
+  sentra list --agent codex-cli-ide
   sentra list skill
   sentra list provider --home ./fixtures/provider/account-home --format json"
     ,
@@ -1497,7 +1502,7 @@ Examples:
 
 示例:
   sentra list
-  sentra list --agent codex-ide
+  sentra list --agent codex-cli-ide
   sentra list skill
   sentra list provider --home ./fixtures/provider/account-home --format json"
     ));
@@ -1526,7 +1531,7 @@ Options:
 Examples:
   sentra scan skill
   sentra scan skill ./fixtures/skill --with-llm
-  sentra scan provider --agent codex --format json"
+  sentra scan provider --agent codex-cli --format json"
     ,
         "\
 用法:
@@ -1549,7 +1554,7 @@ Examples:
 示例:
   sentra scan skill
   sentra scan skill ./fixtures/skill --with-llm
-  sentra scan provider --agent codex --format json"
+  sentra scan provider --agent codex-cli --format json"
     ));
 }
 
@@ -1658,7 +1663,7 @@ Options:
 
 Examples:
   sentra model list
-  sentra model set --agent codex --base-url https://example.test/v1 --api-key sk-test --model demo"
+  sentra model set --agent codex-cli --base-url https://example.test/v1 --api-key sk-test --model demo"
     ,
         "\
 用法:
@@ -1681,7 +1686,7 @@ Examples:
 
 示例:
   sentra model list
-  sentra model set --agent codex --base-url https://example.test/v1 --api-key sk-test --model demo"
+  sentra model set --agent codex-cli --base-url https://example.test/v1 --api-key sk-test --model demo"
     ));
 }
 
@@ -1707,7 +1712,7 @@ Options:
 Examples:
   sentra skill list
   sentra skill add https://example.test/skill.zip
-  sentra skill add https://example.test/skill.zip --agent codex --force",
+  sentra skill add https://example.test/skill.zip --agent codex-cli --force",
             "\
 用法:
   sentra skill list
@@ -1726,7 +1731,7 @@ Examples:
 示例:
   sentra skill list
   sentra skill add https://example.test/skill.zip
-  sentra skill add https://example.test/skill.zip --agent codex --force"
+  sentra skill add https://example.test/skill.zip --agent codex-cli --force"
         )
     );
 }

@@ -1273,7 +1273,7 @@ mod tests {
     fn app_with_report() -> SkillManagerApp {
         let inventories = vec![
             AgentSkillInventory {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 agent_home: PathBuf::from("/home/codex"),
                 skills: vec![skill("alpha", "/codex/alpha")],

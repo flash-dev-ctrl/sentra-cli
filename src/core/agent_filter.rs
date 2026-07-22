@@ -13,7 +13,9 @@ pub(crate) fn canonical_agent_target(target: &str) -> Option<&str> {
 
 fn canonical_agent_filter(filter: &str) -> Option<&str> {
     match filter {
-        "claude-ide" => Some("claude-code-ide"),
+        "codex" => Some("codex-cli"),
+        "codex-ide" => Some("codex-cli-ide"),
+        "claude-ide" | "claude-code-ide" => Some("claude-cli-ide"),
         "anti-gravity" => Some("antigravity"),
         "kiro-cli" => Some("kiro"),
         "qoder-cli" | "qodercli" => Some("qoder"),
@@ -30,8 +32,14 @@ mod tests {
 
     #[test]
     fn canonical_aliases_match_agent_names() {
+        assert!(agent_matches("codex", "codex-cli"));
+        assert!(agent_matches("codex-cli", "codex-cli"));
+        assert!(agent_matches("codex-ide", "codex-cli-ide"));
+        assert!(agent_matches("codex-cli-ide", "codex-cli-ide"));
         assert!(agent_matches("claude", "claude-cli"));
-        assert!(agent_matches("claude-ide", "claude-code-ide"));
+        assert!(agent_matches("claude-ide", "claude-cli-ide"));
+        assert!(agent_matches("claude-code-ide", "claude-cli-ide"));
+        assert!(agent_matches("claude-cli-ide", "claude-cli-ide"));
         assert!(agent_matches("anti-gravity", "antigravity"));
         assert!(agent_matches("kiro-cli", "kiro"));
         assert!(agent_matches("qoder-cli", "qoder"));
@@ -49,11 +57,14 @@ mod tests {
     }
 
     #[test]
-    fn claude_single_target_resolves_to_cli() {
+    fn single_target_aliases_resolve_to_canonical_names() {
+        assert_eq!(canonical_agent_target("codex"), Some("codex-cli"));
+        assert_eq!(canonical_agent_target("codex-ide"), Some("codex-cli-ide"));
         assert_eq!(canonical_agent_target("claude"), Some("claude-cli"));
+        assert_eq!(canonical_agent_target("claude-ide"), Some("claude-cli-ide"));
         assert_eq!(
-            canonical_agent_target("claude-ide"),
-            Some("claude-code-ide")
+            canonical_agent_target("claude-code-ide"),
+            Some("claude-cli-ide")
         );
         assert_eq!(canonical_agent_target("anti-gravity"), Some("antigravity"));
     }

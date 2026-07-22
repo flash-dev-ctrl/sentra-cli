@@ -41,7 +41,7 @@ sentra list agent
 
 ```bash
 sentra list skill
-sentra list skill --agent codex
+sentra list skill --agent codex-cli
 sentra list skill --format json
 ```
 
@@ -49,7 +49,7 @@ sentra list skill --format json
 
 ```bash
 sentra skill add https://example.test/skill.zip
-sentra skill add https://example.test/skill.zip --agent codex --force
+sentra skill add https://example.test/skill.zip --agent codex-cli --force
 ```
 
 扫描所有 Agent 的 Skill：
@@ -61,8 +61,8 @@ sentra scan skill
 扫描指定 Agent：
 
 ```bash
-sentra scan skill --agent codex
-sentra scan skill --agent codex --agent claude
+sentra scan skill --agent codex-cli
+sentra scan skill --agent codex-cli --agent claude
 ```
 
 扫描指定目录中的 Skill：

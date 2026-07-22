@@ -2229,7 +2229,7 @@ mod tests {
             installed: vec![
                 InstallRecord {
                     skill: "executing-plans".to_string(),
-                    agent: "codex".to_string(),
+                    agent: "codex-cli".to_string(),
                     path: PathBuf::from(r"C:\Users\me\.codex\skills\executing-plans"),
                 },
                 InstallRecord {

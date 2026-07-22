@@ -71,7 +71,7 @@ List skills:
 
 ```bash
 sentra list skill
-sentra list skill --agent codex
+sentra list skill --agent codex-cli
 sentra list skill --format json
 ```
 
@@ -79,7 +79,7 @@ Scan skills:
 
 ```bash
 sentra scan skill
-sentra scan skill --agent codex
+sentra scan skill --agent codex-cli
 sentra scan skill /path/to/skills
 ```
 

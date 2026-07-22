@@ -2118,7 +2118,7 @@ mod tests {
     #[test]
     fn model_tui_menu_uses_theme_colors_for_visible_chrome() {
         let records = vec![ModelRecord {
-            agent_name: "codex".to_string(),
+            agent_name: "codex-cli".to_string(),
             agent_title: "Codex".to_string(),
             agent_home: PathBuf::from("/home/codex"),
             provider_name: "gateway.example.test".to_string(),
@@ -2156,7 +2156,7 @@ mod tests {
         );
         assert_cell_fg(
             backend,
-            "codex",
+            "codex-cli",
             theme::body_style().fg.expect("body color"),
         );
         assert_cell_fg(
@@ -2220,7 +2220,7 @@ mod tests {
     fn model_catalog_keeps_agent_provider_model_columns() {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2242,7 +2242,7 @@ mod tests {
         });
         state.mode = ModelTuiMode::Switch;
 
-        assert_eq!(state.current_agent().unwrap().agent_name, "codex");
+        assert_eq!(state.current_agent().unwrap().agent_name, "codex-cli");
         assert_eq!(state.current_provider().unwrap().name, "gateway");
         assert_eq!(state.current_model().unwrap().id, "gpt-test");
     }
@@ -2251,7 +2251,7 @@ mod tests {
     fn add_gateway_appends_temporary_provider_to_current_agent() {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2272,7 +2272,7 @@ mod tests {
         let base_url = server.base_url.clone();
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2320,7 +2320,7 @@ mod tests {
     fn submit_requires_available_model() {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2349,7 +2349,7 @@ mod tests {
         assert_eq!(
             state.submit_selected_model(),
             Some(ModelConfigInput {
-                agent: "codex".to_string(),
+                agent: "codex-cli".to_string(),
                 provider_name: Some("gateway".to_string()),
                 raw_provider_id: Some("gateway-id".to_string()),
                 base_url: "https://gateway.example.test/api".to_string(),
@@ -2365,7 +2365,7 @@ mod tests {
         let state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![
                 AgentProviderEntry {
-                    agent_name: "codex".to_string(),
+                    agent_name: "codex-cli".to_string(),
                     agent_title: "Codex".to_string(),
                     probe_requests: Vec::new(),
                 },
@@ -2396,7 +2396,7 @@ mod tests {
         let catalog = ModelCatalog {
             agents: vec![
                 AgentProviderEntry {
-                    agent_name: "codex".to_string(),
+                    agent_name: "codex-cli".to_string(),
                     agent_title: "Codex".to_string(),
                     probe_requests: default_probe_requests(),
                 },
@@ -2441,7 +2441,7 @@ mod tests {
     fn add_gateway_appends_to_global_gateways() {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2460,7 +2460,7 @@ mod tests {
     #[test]
     fn agent_title_line_does_not_include_home_path() {
         let agent = AgentProviderEntry {
-            agent_name: "codex".to_string(),
+            agent_name: "codex-cli".to_string(),
             agent_title: "Codex".to_string(),
             probe_requests: Vec::new(),
         };
@@ -2501,7 +2501,7 @@ mod tests {
     fn gateway_status_line_shows_full_base_url_and_masked_key() {
         let state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2527,7 +2527,7 @@ mod tests {
     fn switch_view_renders_selected_gateway_base_url_and_masked_key() {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2734,7 +2734,7 @@ mod tests {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![
                 AgentProviderEntry {
-                    agent_name: "codex".to_string(),
+                    agent_name: "codex-cli".to_string(),
                     agent_title: "Codex".to_string(),
                     probe_requests: Vec::new(),
                 },
@@ -2790,7 +2790,7 @@ mod tests {
     fn probe_scheduler_respects_concurrency_limit() {
         let mut state = ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
@@ -2825,7 +2825,7 @@ mod tests {
     fn model_state_with_three_models() -> ModelTuiState {
         ModelTuiState::with_catalog(ModelCatalog {
             agents: vec![AgentProviderEntry {
-                agent_name: "codex".to_string(),
+                agent_name: "codex-cli".to_string(),
                 agent_title: "Codex".to_string(),
                 probe_requests: Vec::new(),
             }],
