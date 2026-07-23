@@ -10,7 +10,7 @@ const CODEBUDDY_AGENT_FAMILY: &[&str] = &[
     "codebuddy-cli",
     "codebuddy-ide",
     "codebuddy-cn-ide",
-    "codebuddy-ide-plugin",
+    "codebuddy-cli-ide",
     "workbuddy",
 ];
 
@@ -49,9 +49,7 @@ fn canonical_agent_filter(filter: &str) -> Option<&str> {
         "codebuddy-code" | "codebuddy-cli" => Some("codebuddy-cli"),
         "codebuddy-ide" => Some("codebuddy-ide"),
         "codebuddy-cn" | "codebuddycn" | "codebuddy-cn-ide" => Some("codebuddy-cn-ide"),
-        "codebuddy-plugin" | "codebuddy-ide-plugin" | "coding-copilot" => {
-            Some("codebuddy-ide-plugin")
-        }
+        "codebuddy-cli-ide" => Some("codebuddy-cli-ide"),
         "qocder-cli" | "qcoder-app" | "qoder-app" => None,
         other => Some(other),
     }
@@ -98,15 +96,14 @@ mod tests {
         assert!(agent_matches("codebuddy", "codebuddy-cli"));
         assert!(agent_matches("codebuddy", "codebuddy-ide"));
         assert!(agent_matches("codebuddy", "codebuddy-cn-ide"));
-        assert!(agent_matches("codebuddy", "codebuddy-ide-plugin"));
+        assert!(agent_matches("codebuddy", "codebuddy-cli-ide"));
         assert!(agent_matches("codebuddy", "workbuddy"));
         assert!(agent_matches("codebuddy-code", "codebuddy-cli"));
         assert!(agent_matches("codebuddy-cli", "codebuddy-cli"));
         assert!(agent_matches("codebuddy-ide", "codebuddy-ide"));
         assert!(agent_matches("codebuddy-cn", "codebuddy-cn-ide"));
         assert!(agent_matches("codebuddycn", "codebuddy-cn-ide"));
-        assert!(agent_matches("codebuddy-plugin", "codebuddy-ide-plugin"));
-        assert!(agent_matches("coding-copilot", "codebuddy-ide-plugin"));
+        assert!(agent_matches("codebuddy-cli-ide", "codebuddy-cli-ide"));
     }
 
     #[test]
@@ -145,8 +142,8 @@ mod tests {
             Some("codebuddy-cn-ide")
         );
         assert_eq!(
-            canonical_agent_target("codebuddy-plugin"),
-            Some("codebuddy-ide-plugin")
+            canonical_agent_target("codebuddy-cli-ide"),
+            Some("codebuddy-cli-ide")
         );
     }
 }
