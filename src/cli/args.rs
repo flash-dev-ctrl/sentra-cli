@@ -278,7 +278,9 @@ fn is_install_target(agent: &str) -> bool {
             | "opencode"
             | "pi"
             | "qoder"
+            | "qoder-cli"
             | "qoderwork"
+            | "qoder-work"
             | "trae"
             | "vscode"
             | "workbuddy"
@@ -692,12 +694,20 @@ mod tests {
             "marvis",
             "opencode",
             "pi",
-            "qoder",
-            "qoderwork",
+            "qoder-cli",
+            "qoder-work",
             "trae",
             "vscode",
             "workbuddy",
         ] {
+            let command = parse_args(os_args(&["install", target])).unwrap();
+            assert!(matches!(command, Command::Install { agent } if agent == target));
+        }
+    }
+
+    #[test]
+    fn install_command_accepts_legacy_qoder_aliases() {
+        for target in ["qoder", "qoderwork"] {
             let command = parse_args(os_args(&["install", target])).unwrap();
             assert!(matches!(command, Command::Install { agent } if agent == target));
         }
@@ -729,12 +739,22 @@ mod tests {
             "marvis",
             "opencode",
             "pi",
-            "qoder",
-            "qoderwork",
+            "qoder-cli",
+            "qoder-work",
             "trae",
             "vscode",
             "workbuddy",
         ] {
+            let command = parse_args(os_args(&["uninstall", target])).unwrap();
+            assert!(
+                matches!(command, Command::Uninstall { agent, force: false } if agent == target)
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_command_accepts_legacy_qoder_aliases() {
+        for target in ["qoder", "qoderwork"] {
             let command = parse_args(os_args(&["uninstall", target])).unwrap();
             assert!(
                 matches!(command, Command::Uninstall { agent, force: false } if agent == target)
@@ -1377,12 +1397,13 @@ Description:
 
 Agents:
   All platforms:  codebuddy, codex-cli, kimi-cli, opencode, pi
-  Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder, trae, vscode
-  Platform blocked: qoderwork, workbuddy (Linux)
+  Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
+  macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
+  Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode
+  Platform blocked: qoder-work, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
-  Aliases: kimi, kimi-code -> kimi-cli
+  Aliases: kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
+  Agent filter aliases: qoderclicn, lingma -> qoder-cn-cli
 
 Options:
   -h, --help  Show help
@@ -1400,12 +1421,13 @@ Examples:
 
 Agent:
   全平台:          codebuddy、codex-cli、kimi-cli、opencode、pi
-  Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder、trae、vscode
-  平台未发布:      qoderwork、workbuddy（Linux）
+  Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
+  macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
+  Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae、vscode
+  平台未发布:      qoder-work、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
-  别名: kimi、kimi-code -> kimi-cli
+  别名: kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
+  Agent 过滤别名: qoderclicn、lingma -> qoder-cn-cli
 
 选项:
   -h, --help  显示帮助
@@ -1431,12 +1453,13 @@ Description:
 
 Agents:
   All platforms: codebuddy, codex-cli, kimi-cli, opencode, pi
-  Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder, qoderwork, trae, vscode, workbuddy
-  Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder, trae, vscode
-  Platform blocked: qoderwork, workbuddy (Linux)
+  Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
+  macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
+  Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode
+  Platform blocked: qoder-work, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
-  Aliases: kimi, kimi-code -> kimi-cli
+  Aliases: kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
+  Agent filter aliases: qoderclicn, lingma -> qoder-cn-cli
 
 Options:
   -f, --force  Delete configuration data without asking
@@ -1455,12 +1478,13 @@ Examples:
 
 Agent:
   全平台:  codebuddy、codex-cli、kimi-cli、opencode、pi
-  Windows: antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder、qoderwork、trae、vscode、workbuddy
-  Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder、trae、vscode
-  平台未发布: qoderwork、workbuddy（Linux）
+  Windows: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
+  macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
+  Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae、vscode
+  平台未发布: qoder-work、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
-  别名: kimi、kimi-code -> kimi-cli
+  别名: kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
+  Agent 过滤别名: qoderclicn、lingma -> qoder-cn-cli
 
 选项:
   -f, --force  不询问并直接删除配置数据

@@ -1107,7 +1107,7 @@ fn sentra_list_agent_filter_accepts_official_alias() {
     let assets = value.as_array().unwrap();
 
     assert_eq!(assets.len(), 1);
-    assert_eq!(assets[0]["agentName"], "qoder");
+    assert_eq!(assets[0]["agentName"], "qoder-cli");
 }
 
 #[test]
@@ -2855,13 +2855,15 @@ fn sentra_agent_install_help_lists_cross_platform_support() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.lines().any(|line| {
             line.trim_start().starts_with("macOS:")
-                && line.contains("antigravity, claude, coder, cursor, kiro, qoder")
+                && line.contains("antigravity, claude-cli, coder, cursor, kiro, qoder-cli")
         }));
         assert!(stdout.lines().any(|line| {
             line.trim_start().starts_with("Linux:")
-                && line.contains("antigravity, claude, coder, cursor, kiro, qoder, trae, vscode")
+                && line.contains(
+                    "antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode",
+                )
         }));
-        assert!(stdout.contains("qoderwork, workbuddy (Linux)"));
+        assert!(stdout.contains("qoder-work, workbuddy (Linux)"));
     }
 }
 

@@ -20,8 +20,9 @@ fn canonical_agent_filter(filter: &str) -> Option<&str> {
         "kimi-ide" | "kimi-code-ide" => Some("kimi-cli-ide"),
         "anti-gravity" => Some("antigravity"),
         "kiro-cli" => Some("kiro"),
-        "qoder-cli" | "qodercli" => Some("qoder"),
-        "qoderclicn" | "lingma" => Some("qoder-cn"),
+        "qoder" | "qoder-cli" | "qodercli" => Some("qoder-cli"),
+        "qoderwork" | "qoder-work" => Some("qoder-work"),
+        "qoder-cn" | "qoder-cn-cli" | "qoderclicn" | "lingma" => Some("qoder-cn-cli"),
         "codebuddy-code" => Some("codebuddy"),
         "qocder-cli" | "qcoder-app" | "qoder-app" => None,
         other => Some(other),
@@ -49,18 +50,26 @@ mod tests {
         assert!(agent_matches("kimi-cli-ide", "kimi-cli-ide"));
         assert!(agent_matches("anti-gravity", "antigravity"));
         assert!(agent_matches("kiro-cli", "kiro"));
-        assert!(agent_matches("qoder-cli", "qoder"));
-        assert!(agent_matches("qodercli", "qoder"));
-        assert!(agent_matches("qoderclicn", "qoder-cn"));
-        assert!(agent_matches("lingma", "qoder-cn"));
+        assert!(agent_matches("qoder", "qoder-cli"));
+        assert!(agent_matches("qoder-cli", "qoder-cli"));
+        assert!(agent_matches("qodercli", "qoder-cli"));
+        assert!(agent_matches("qoder-ide", "qoder-ide"));
+        assert!(agent_matches("qoderwork", "qoder-work"));
+        assert!(agent_matches("qoder-work", "qoder-work"));
+        assert!(agent_matches("qoder-cn", "qoder-cn-cli"));
+        assert!(agent_matches("qoder-cn-cli", "qoder-cn-cli"));
+        assert!(agent_matches("qoderclicn", "qoder-cn-cli"));
+        assert!(agent_matches("lingma", "qoder-cn-cli"));
+        assert!(agent_matches("qoder-cn-ide", "qoder-cn-ide"));
+        assert!(agent_matches("qoder-cn-work", "qoder-cn-work"));
         assert!(agent_matches("codebuddy-code", "codebuddy"));
     }
 
     #[test]
     fn unofficial_misspellings_do_not_match() {
-        assert!(!agent_matches("qocder-cli", "qoder"));
-        assert!(!agent_matches("qcoder-app", "qoderwork"));
-        assert!(!agent_matches("qoder-app", "qoderwork"));
+        assert!(!agent_matches("qocder-cli", "qoder-cli"));
+        assert!(!agent_matches("qcoder-app", "qoder-work"));
+        assert!(!agent_matches("qoder-app", "qoder-work"));
     }
 
     #[test]
@@ -77,5 +86,8 @@ mod tests {
         assert_eq!(canonical_agent_target("kimi"), Some("kimi-cli"));
         assert_eq!(canonical_agent_target("kimi-code"), Some("kimi-cli"));
         assert_eq!(canonical_agent_target("kimi-ide"), Some("kimi-cli-ide"));
+        assert_eq!(canonical_agent_target("qoder"), Some("qoder-cli"));
+        assert_eq!(canonical_agent_target("qoderwork"), Some("qoder-work"));
+        assert_eq!(canonical_agent_target("qoder-cn"), Some("qoder-cn-cli"));
     }
 }
