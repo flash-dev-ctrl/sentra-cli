@@ -271,7 +271,7 @@ fn kimi_surfaces_sentra_list_agent_outputs_canonical_names() {
     assert!(
         agents
             .iter()
-            .any(|agent| { agent["name"] == "kimi-app" && agent["title"] == "Kimi App" })
+            .any(|agent| { agent["name"] == "kimi-app" && agent["title"] == "Kimi Work" })
     );
     assert!(agents.iter().any(|agent| {
         agent["name"] == "kimi-cli-ide" && agent["title"] == "Kimi Code IDE Extension"
