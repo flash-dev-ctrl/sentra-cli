@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.9
+
+- Synced the bundled Sentra library main pointer after the CodeBuddy and Cursor fixes.
+- Added CodeBuddy CLI provider discovery from the official `models.json` format.
+- Marked the active CodeBuddy CLI provider and model from `settings.json`.
+- Fixed CodeBuddy CN IDE cron collection for automation databases without `deleted_at`.
+- Improved cron terminal output by showing task names and single-line prompt previews.
+- Updated Qoder and CodeBuddy product family discovery and Cursor cron support.
+- Renamed Kimi App display metadata to Kimi Work.
+
 ## 0.2.6
 
 - Added process asset listing for supported agents.
