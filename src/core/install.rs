@@ -176,7 +176,7 @@ mod tests {
             stage: AgentInstallProgressStage::Trying,
         });
 
-        assert_eq!(rendered, "  [2/3] Try WinGet\n  Target: codex");
+        assert_eq!(rendered, "  [2/3] Try WinGet\n  Target: codex-cli");
         assert!(!rendered.contains("command:"));
     }
 

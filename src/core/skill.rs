@@ -2243,7 +2243,7 @@ mod tests {
         let rendered = render_install_summary(&summary);
 
         assert!(rendered.starts_with("Installed 2 skill copies\n\nexecuting-plans\n"));
-        assert!(rendered.contains(r"codex       C:\Users\me\.codex\skills\executing-plans"));
+        assert!(rendered.contains(r"codex-cli   C:\Users\me\.codex\skills\executing-plans"));
         assert!(rendered.contains(r"claude-cli  C:\Users\me\.claude\skills\executing-plans"));
     }
 }
