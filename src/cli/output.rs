@@ -5,13 +5,15 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Local};
 use sentra_lib::{SentraError, SentraResult};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::cli::args::{OutputFormat, OutputOptions};
 use crate::cli::i18n::{Language, current, t, yes_no};
 use crate::tui::theme::{AnsiStyle, paint, severity_ansi_style};
 
 const PROVIDER_CATALOG_JSON: &str = include_str!("../catelogs/providers.json");
+const CRON_PROMPT_PREVIEW_WIDTH: usize = 48;
+const TEXT_PREVIEW_ELLIPSIS: &str = "...";
 
 pub(crate) fn print_json<T: serde::Serialize>(value: T) -> SentraResult<()> {
     let json = serde_json::to_string_pretty(&value)
@@ -356,7 +358,11 @@ fn format_cron_assets(items: &[serde_json::Value], semantic_symbols: bool) -> St
                     .to_string(),
                 enabled_label(data),
                 string_field(data, "schedule"),
-                display_text_field(data, &["prompt", "description"]),
+                display_text_preview_field(
+                    data,
+                    &["prompt", "description"],
+                    CRON_PROMPT_PREVIEW_WIDTH,
+                ),
             ]);
         }
     }
@@ -376,7 +382,7 @@ fn format_cron_assets(items: &[serde_json::Value], semantic_symbols: bool) -> St
             &format!("{} ({})", t("Crons", "定时任务"), rows.len()),
             &[
                 t("AGENT", "AGENT"),
-                t("CRON", "定时"),
+                t("NAME", "名称"),
                 t("ENABLED", "启用"),
                 t("SCHEDULE", "调度"),
                 t("PROMPT", "提示词"),
@@ -1231,6 +1237,43 @@ fn display_width(value: &str) -> usize {
     UnicodeWidthStr::width(value)
 }
 
+fn truncate_display_width(
+    value: &str,
+    max_width: usize,
+    marker: &str,
+    force_marker: bool,
+) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if !force_marker && display_width(value) <= max_width {
+        return value.to_string();
+    }
+
+    let marker_width = display_width(marker);
+    if marker_width >= max_width {
+        return take_display_width(marker, max_width);
+    }
+
+    let mut output = take_display_width(value, max_width - marker_width);
+    output.push_str(marker);
+    output
+}
+
+fn take_display_width(value: &str, max_width: usize) -> String {
+    let mut output = String::new();
+    let mut width = 0;
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if width + character_width > max_width {
+            break;
+        }
+        output.push(character);
+        width += character_width;
+    }
+    output
+}
+
 fn data_items(value: &serde_json::Value) -> Vec<&serde_json::Value> {
     match value.get("data") {
         Some(serde_json::Value::Array(items)) => items.iter().collect(),
@@ -1312,6 +1355,30 @@ fn display_text_field(value: &serde_json::Value, keys: &[&str]) -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("-")
         .to_string()
+}
+
+fn display_text_preview_field(
+    value: &serde_json::Value,
+    keys: &[&str],
+    max_width: usize,
+) -> String {
+    let text = display_text_field(value, keys);
+    if text == "-" {
+        return text;
+    }
+    single_line_preview(&text, max_width)
+}
+
+fn single_line_preview(value: &str, max_width: usize) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return "-".to_string();
+    }
+
+    let mut lines = value.lines();
+    let first_line = lines.next().unwrap_or_default().trim();
+    let has_more_lines = lines.next().is_some();
+    truncate_display_width(first_line, max_width, TEXT_PREVIEW_ELLIPSIS, has_more_lines)
 }
 
 fn account_label(value: &serde_json::Value) -> String {
@@ -1571,7 +1638,7 @@ mod tests {
                 "data": [
                     {
                         "name": "daily-news-update",
-                        "prompt": "每天早上8:30获取最新新闻",
+                        "prompt": "每天早上8:30获取最新新闻\n第二行不应显示",
                         "enabled": true,
                         "schedule": "30 8 * * *"
                     }
@@ -1584,15 +1651,25 @@ mod tests {
         assert!(output.contains("List cron tasks"));
         assert!(output.contains("1 cron task(s) discovered"));
         assert!(output.contains("AGENT"));
-        assert!(output.contains("CRON"));
+        assert!(output.contains("NAME"));
         assert!(output.contains("ENABLED"));
         assert!(output.contains("SCHEDULE"));
         assert!(output.contains("PROMPT"));
         assert!(output.contains("claude-app"));
         assert!(output.contains("daily-news-update"));
         assert!(output.contains("30 8 * * *"));
-        assert!(output.contains("每天早上8:30获取最新新闻"));
+        assert!(output.contains("每天早上8:30获取最新新闻..."));
+        assert!(!output.contains("第二行不应显示"));
+        assert!(!output.contains("CRON"));
         assert!(!output.contains("DESCRIPTION"));
+    }
+
+    #[test]
+    fn prompt_preview_truncates_long_single_line_text() {
+        assert_eq!(
+            single_line_preview("abcdefghijklmnopqrstuvwxyz", 10),
+            "abcdefg..."
+        );
     }
 
     #[test]
