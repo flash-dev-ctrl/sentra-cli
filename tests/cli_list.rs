@@ -1111,6 +1111,56 @@ fn sentra_list_agent_filter_accepts_official_alias() {
 }
 
 #[test]
+fn sentra_list_agent_filter_accepts_qoder_family() {
+    let dir = tempfile::tempdir().unwrap();
+    write_skill(dir.path(), ".qoder", "qoder-cli-demo");
+    write_skill(dir.path(), ".qoderwork", "qoder-work-demo");
+    write_skill(dir.path(), ".qoder-cn", "qoder-cn-cli-demo");
+
+    let family_output = sentra_command()
+        .args(["list", "skill", "--agent", "qoder", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        family_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&family_output.stderr)
+    );
+    let family_value: serde_json::Value = serde_json::from_slice(&family_output.stdout).unwrap();
+    let family_assets = family_value.as_array().unwrap();
+    let family_agents = family_assets
+        .iter()
+        .map(|asset| asset["agentName"].as_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(family_assets.len(), 3, "assets: {family_assets:?}");
+    assert!(family_agents.contains(&"qoder-cli"));
+    assert!(family_agents.contains(&"qoder-work"));
+    assert!(family_agents.contains(&"qoder-cn-cli"));
+
+    let exact_output = sentra_command()
+        .args(["list", "skill", "--agent", "qoder-cli", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        exact_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&exact_output.stderr)
+    );
+    let exact_value: serde_json::Value = serde_json::from_slice(&exact_output.stdout).unwrap();
+    let exact_assets = exact_value.as_array().unwrap();
+
+    assert_eq!(exact_assets.len(), 1, "assets: {exact_assets:?}");
+    assert_eq!(exact_assets[0]["agentName"], "qoder-cli");
+}
+
+#[test]
 fn sentra_list_agent_filter_rejects_unofficial_qoder_misspelling() {
     let dir = tempfile::tempdir().unwrap();
     write_skill(dir.path(), ".qoder", "qoder-demo");
@@ -2853,6 +2903,8 @@ fn sentra_agent_install_help_lists_cross_platform_support() {
         assert!(output.status.success());
         assert!(output.stderr.is_empty());
         let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("codebuddy-cli, codex-cli"));
+        assert!(stdout.contains("codebuddy, codebuddy-code -> codebuddy-cli"));
         assert!(stdout.lines().any(|line| {
             line.trim_start().starts_with("macOS:")
                 && line.contains("antigravity, claude-cli, coder, cursor, kiro, qoder-cli")

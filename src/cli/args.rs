@@ -265,6 +265,8 @@ fn is_install_target(agent: &str) -> bool {
             | "claude"
             | "claude-cli"
             | "codebuddy"
+            | "codebuddy-code"
+            | "codebuddy-cli"
             | "coder"
             | "codex"
             | "codex-cli"
@@ -682,6 +684,8 @@ mod tests {
             "claude",
             "claude-cli",
             "codebuddy",
+            "codebuddy-code",
+            "codebuddy-cli",
             "coder",
             "codex",
             "codex-cli",
@@ -714,6 +718,14 @@ mod tests {
     }
 
     #[test]
+    fn install_command_accepts_legacy_codebuddy_aliases() {
+        for target in ["codebuddy", "codebuddy-code"] {
+            let command = parse_args(os_args(&["install", target])).unwrap();
+            assert!(matches!(command, Command::Install { agent } if agent == target));
+        }
+    }
+
+    #[test]
     fn install_command_rejects_unsupported_agents() {
         let err = parse_args(os_args(&["install", "gemini"])).unwrap_err();
 
@@ -727,6 +739,8 @@ mod tests {
             "claude",
             "claude-cli",
             "codebuddy",
+            "codebuddy-code",
+            "codebuddy-cli",
             "coder",
             "codex",
             "codex-cli",
@@ -755,6 +769,16 @@ mod tests {
     #[test]
     fn uninstall_command_accepts_legacy_qoder_aliases() {
         for target in ["qoder", "qoderwork"] {
+            let command = parse_args(os_args(&["uninstall", target])).unwrap();
+            assert!(
+                matches!(command, Command::Uninstall { agent, force: false } if agent == target)
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_command_accepts_legacy_codebuddy_aliases() {
+        for target in ["codebuddy", "codebuddy-code"] {
             let command = parse_args(os_args(&["uninstall", target])).unwrap();
             assert!(
                 matches!(command, Command::Uninstall { agent, force: false } if agent == target)
@@ -1396,13 +1420,13 @@ Description:
   Install an agent. If it is already installed, update it.
 
 Agents:
-  All platforms:  codebuddy, codex-cli, kimi-cli, opencode, pi
+  All platforms:  codebuddy-cli, codex-cli, kimi-cli, opencode, pi
   Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
   macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
   Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode
   Platform blocked: qoder-work, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
-  Aliases: kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
+  Aliases: codebuddy, codebuddy-code -> codebuddy-cli; kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
   Agent filter aliases: qoderclicn, lingma -> qoder-cn-cli
 
 Options:
@@ -1420,13 +1444,13 @@ Examples:
   安装 Agent；如果已经安装则更新。
 
 Agent:
-  全平台:          codebuddy、codex-cli、kimi-cli、opencode、pi
+  全平台:          codebuddy-cli、codex-cli、kimi-cli、opencode、pi
   Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
   macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
   Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae、vscode
   平台未发布:      qoder-work、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
-  别名: kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
+  别名: codebuddy、codebuddy-code -> codebuddy-cli；kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
   Agent 过滤别名: qoderclicn、lingma -> qoder-cn-cli
 
 选项:
@@ -1452,13 +1476,13 @@ Description:
   Uninstall an agent. By default, Sentra asks whether to delete local configuration data.
 
 Agents:
-  All platforms: codebuddy, codex-cli, kimi-cli, opencode, pi
+  All platforms: codebuddy-cli, codex-cli, kimi-cli, opencode, pi
   Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
   macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
   Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode
   Platform blocked: qoder-work, workbuddy (Linux)
   Source blocked on every platform: lingcode, marvis
-  Aliases: kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
+  Aliases: codebuddy, codebuddy-code -> codebuddy-cli; kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
   Agent filter aliases: qoderclicn, lingma -> qoder-cn-cli
 
 Options:
@@ -1477,13 +1501,13 @@ Examples:
   卸载 Agent。默认会询问是否删除本地配置数据。
 
 Agent:
-  全平台:  codebuddy、codex-cli、kimi-cli、opencode、pi
+  全平台:  codebuddy-cli、codex-cli、kimi-cli、opencode、pi
   Windows: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
   macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
   Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae、vscode
   平台未发布: qoder-work、workbuddy（Linux）
   全平台可信来源暂不可用: lingcode、marvis
-  别名: kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
+  别名: codebuddy、codebuddy-code -> codebuddy-cli；kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
   Agent 过滤别名: qoderclicn、lingma -> qoder-cn-cli
 
 选项:
@@ -1505,11 +1529,11 @@ Usage:
   sentra list [<skill|mcp|provider|memory|agent|cron|plugin|process>] [--home <path>] [--agent <name>] [--format <terminal|json>] [--output <file>]
 
 Description:
-  List all discovered asset types by default, or one asset type. Use --agent to limit results to matching agents.
+  List all discovered asset types by default, or one asset type. Use --agent to limit results to matching agents or families.
 
 Options:
   --home <path>       Read agent homes under this user home
-  --agent <name>      Filter assets to an agent
+  --agent <name>      Filter assets to an agent or family
   --format <format>   Output format: terminal, json
   -o, --output <file> Write command output to a file
   -h, --help          Show help
@@ -1525,11 +1549,11 @@ Examples:
   sentra list [<skill|mcp|provider|memory|agent|cron|plugin|process>] [--home <路径>] [--agent <名称>] [--format <terminal|json>] [--output <文件>]
 
 说明:
-  默认列出发现的全部资产类型，也可指定一种资产类型；可用 --agent 将结果限制为匹配的 Agent。
+  默认列出发现的全部资产类型，也可指定一种资产类型；可用 --agent 将结果限制为匹配的 Agent 或家族。
 
 选项:
   --home <路径>      从指定用户主目录读取 Agent
-  --agent <名称>     按 Agent 过滤资产
+  --agent <名称>     按 Agent 或家族过滤资产
   --format <格式>    输出格式: terminal, json
   -o, --output <文件> 将命令输出写入文件
   -h, --help         显示帮助
@@ -1552,7 +1576,7 @@ Description:
   Scan assets or a skill path for security risks.
 
 Options:
-  -a, --agent <name>  Filter scans to one or more agents
+  -a, --agent <name>  Filter scans to one or more agents or families
   -f, --format <fmt>  Output format: terminal, table, json
   -o, --output <file> Write command output to a file
   --llm               Enable LLM checker
@@ -1575,7 +1599,7 @@ Examples:
   扫描资产或技能路径中的安全风险。
 
 选项:
-  -a, --agent <名称> 按一个或多个 Agent 过滤扫描
+  -a, --agent <名称> 按一个或多个 Agent 或家族过滤扫描
   -f, --format <格式> 输出格式: terminal, table, json
   -o, --output <文件> 将命令输出写入文件
   --llm              启用 LLM 检查器
@@ -1737,7 +1761,7 @@ Description:
   Manage skills or install a skill after scanning it for risks.
 
 Options:
-  --agent <name> Filter installation to one or more agents
+  --agent <name> Filter installation to one or more agents or families
   -f, --force    Allow installing skills with risk findings
   --with-xxx     Enable checker: hash, yara, ti, llm, online-ti
   --without-xxx  Disable checker: hash, yara, ti, llm, online-ti
@@ -1756,7 +1780,7 @@ Examples:
   管理技能，或在风险扫描后安装技能。
 
 选项:
-  --agent <名称> 按一个或多个 Agent 过滤安装
+  --agent <名称> 按一个或多个 Agent 或家族过滤安装
   -f, --force    允许安装包含风险发现的技能
   --with-xxx     启用检查器: hash, yara, ti, llm, online-ti
   --without-xxx  禁用检查器: hash, yara, ti, llm, online-ti

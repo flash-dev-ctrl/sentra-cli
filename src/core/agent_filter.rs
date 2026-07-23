@@ -1,12 +1,33 @@
+const QODER_AGENT_FAMILY: &[&str] = &[
+    "qoder-cli",
+    "qoder-ide",
+    "qoder-work",
+    "qoder-cn-cli",
+    "qoder-cn-ide",
+    "qoder-cn-work",
+];
+const CODEBUDDY_AGENT_FAMILY: &[&str] = &[
+    "codebuddy-cli",
+    "codebuddy-ide",
+    "codebuddy-cn-ide",
+    "codebuddy-ide-plugin",
+    "workbuddy",
+];
+
 pub(crate) fn agent_matches(filter: &str, agent_name: &str) -> bool {
     canonical_agent_filter(filter).is_some_and(|filter| {
-        filter == agent_name || filter == "claude" && agent_name.starts_with("claude-")
+        filter == agent_name
+            || filter == "claude" && agent_name.starts_with("claude-")
+            || filter == "qoder" && QODER_AGENT_FAMILY.contains(&agent_name)
+            || filter == "codebuddy" && CODEBUDDY_AGENT_FAMILY.contains(&agent_name)
     })
 }
 
 pub(crate) fn canonical_agent_target(target: &str) -> Option<&str> {
     match canonical_agent_filter(target)? {
         "claude" => Some("claude-cli"),
+        "qoder" => Some("qoder-cli"),
+        "codebuddy" => Some("codebuddy-cli"),
         target => Some(target),
     }
 }
@@ -20,10 +41,17 @@ fn canonical_agent_filter(filter: &str) -> Option<&str> {
         "kimi-ide" | "kimi-code-ide" => Some("kimi-cli-ide"),
         "anti-gravity" => Some("antigravity"),
         "kiro-cli" => Some("kiro"),
-        "qoder" | "qoder-cli" | "qodercli" => Some("qoder-cli"),
+        "qoder" => Some("qoder"),
+        "qoder-cli" | "qodercli" => Some("qoder-cli"),
         "qoderwork" | "qoder-work" => Some("qoder-work"),
         "qoder-cn" | "qoder-cn-cli" | "qoderclicn" | "lingma" => Some("qoder-cn-cli"),
-        "codebuddy-code" => Some("codebuddy"),
+        "codebuddy" => Some("codebuddy"),
+        "codebuddy-code" | "codebuddy-cli" => Some("codebuddy-cli"),
+        "codebuddy-ide" => Some("codebuddy-ide"),
+        "codebuddy-cn" | "codebuddycn" | "codebuddy-cn-ide" => Some("codebuddy-cn-ide"),
+        "codebuddy-plugin" | "codebuddy-ide-plugin" | "coding-copilot" => {
+            Some("codebuddy-ide-plugin")
+        }
         "qocder-cli" | "qcoder-app" | "qoder-app" => None,
         other => Some(other),
     }
@@ -51,6 +79,11 @@ mod tests {
         assert!(agent_matches("anti-gravity", "antigravity"));
         assert!(agent_matches("kiro-cli", "kiro"));
         assert!(agent_matches("qoder", "qoder-cli"));
+        assert!(agent_matches("qoder", "qoder-ide"));
+        assert!(agent_matches("qoder", "qoder-work"));
+        assert!(agent_matches("qoder", "qoder-cn-cli"));
+        assert!(agent_matches("qoder", "qoder-cn-ide"));
+        assert!(agent_matches("qoder", "qoder-cn-work"));
         assert!(agent_matches("qoder-cli", "qoder-cli"));
         assert!(agent_matches("qodercli", "qoder-cli"));
         assert!(agent_matches("qoder-ide", "qoder-ide"));
@@ -62,7 +95,18 @@ mod tests {
         assert!(agent_matches("lingma", "qoder-cn-cli"));
         assert!(agent_matches("qoder-cn-ide", "qoder-cn-ide"));
         assert!(agent_matches("qoder-cn-work", "qoder-cn-work"));
-        assert!(agent_matches("codebuddy-code", "codebuddy"));
+        assert!(agent_matches("codebuddy", "codebuddy-cli"));
+        assert!(agent_matches("codebuddy", "codebuddy-ide"));
+        assert!(agent_matches("codebuddy", "codebuddy-cn-ide"));
+        assert!(agent_matches("codebuddy", "codebuddy-ide-plugin"));
+        assert!(agent_matches("codebuddy", "workbuddy"));
+        assert!(agent_matches("codebuddy-code", "codebuddy-cli"));
+        assert!(agent_matches("codebuddy-cli", "codebuddy-cli"));
+        assert!(agent_matches("codebuddy-ide", "codebuddy-ide"));
+        assert!(agent_matches("codebuddy-cn", "codebuddy-cn-ide"));
+        assert!(agent_matches("codebuddycn", "codebuddy-cn-ide"));
+        assert!(agent_matches("codebuddy-plugin", "codebuddy-ide-plugin"));
+        assert!(agent_matches("coding-copilot", "codebuddy-ide-plugin"));
     }
 
     #[test]
@@ -70,6 +114,8 @@ mod tests {
         assert!(!agent_matches("qocder-cli", "qoder-cli"));
         assert!(!agent_matches("qcoder-app", "qoder-work"));
         assert!(!agent_matches("qoder-app", "qoder-work"));
+        assert!(!agent_matches("qoder-cli", "qoder-work"));
+        assert!(!agent_matches("codebuddy-cli", "codebuddy-ide"));
     }
 
     #[test]
@@ -89,5 +135,18 @@ mod tests {
         assert_eq!(canonical_agent_target("qoder"), Some("qoder-cli"));
         assert_eq!(canonical_agent_target("qoderwork"), Some("qoder-work"));
         assert_eq!(canonical_agent_target("qoder-cn"), Some("qoder-cn-cli"));
+        assert_eq!(canonical_agent_target("codebuddy"), Some("codebuddy-cli"));
+        assert_eq!(
+            canonical_agent_target("codebuddy-code"),
+            Some("codebuddy-cli")
+        );
+        assert_eq!(
+            canonical_agent_target("codebuddy-cn"),
+            Some("codebuddy-cn-ide")
+        );
+        assert_eq!(
+            canonical_agent_target("codebuddy-plugin"),
+            Some("codebuddy-ide-plugin")
+        );
     }
 }
