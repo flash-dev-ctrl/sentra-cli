@@ -2229,7 +2229,7 @@ mod tests {
             installed: vec![
                 InstallRecord {
                     skill: "executing-plans".to_string(),
-                    agent: "codex".to_string(),
+                    agent: "codex-cli".to_string(),
                     path: PathBuf::from(r"C:\Users\me\.codex\skills\executing-plans"),
                 },
                 InstallRecord {
@@ -2243,7 +2243,7 @@ mod tests {
         let rendered = render_install_summary(&summary);
 
         assert!(rendered.starts_with("Installed 2 skill copies\n\nexecuting-plans\n"));
-        assert!(rendered.contains(r"codex       C:\Users\me\.codex\skills\executing-plans"));
+        assert!(rendered.contains(r"codex-cli   C:\Users\me\.codex\skills\executing-plans"));
         assert!(rendered.contains(r"claude-cli  C:\Users\me\.claude\skills\executing-plans"));
     }
 }

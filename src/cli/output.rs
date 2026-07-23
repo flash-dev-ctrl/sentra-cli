@@ -1470,7 +1470,7 @@ mod tests {
         let value = serde_json::json!([
             {
                 "assetType": "provider",
-                "agentName": "kimi-code",
+                "agentName": "kimi-cli",
                 "data": [
                     {
                         "name": "managed:kimi-code",
@@ -1540,7 +1540,7 @@ mod tests {
             &["AGENT", "CRON", "DESCRIPTION"],
             vec![
                 vec![
-                    "codex".to_string(),
+                    "codex-cli".to_string(),
                     "每日热门新闻三条".to_string(),
                     "-".to_string(),
                 ],
@@ -1600,7 +1600,7 @@ mod tests {
         let value = serde_json::json!([
             {
                 "assetType": "process",
-                "agentName": "codex",
+                "agentName": "codex-cli",
                 "data": [
                     {
                         "pid": 42,
@@ -1650,7 +1650,7 @@ mod tests {
         assert!(header.find(run_time_header).unwrap() < header.find(path_header).unwrap());
         assert!(!output.contains("NAME"));
         assert!(!output.contains("CMDLINE"));
-        assert!(output.contains("codex"));
+        assert!(output.contains("codex-cli"));
         assert!(output.contains("42"));
         assert!(output.contains("2023-11"));
         assert!(output.contains("1h 01m 01s"));

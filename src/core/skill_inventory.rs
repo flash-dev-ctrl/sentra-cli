@@ -185,7 +185,7 @@ mod tests {
     fn grouped_skills_put_installed_first_then_available_difference() {
         let inventories = vec![
             agent(
-                "codex",
+                "codex-cli",
                 vec![skill("b", "/codex/b"), skill("a", "/codex/a")],
             ),
             agent(
@@ -209,8 +209,8 @@ mod tests {
         assert_eq!(
             rendered,
             vec![
-                ("a", true, "codex"),
-                ("b", true, "codex"),
+                ("a", true, "codex-cli"),
+                ("b", true, "codex-cli"),
                 ("c", false, "sentra")
             ]
         );
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn available_duplicate_names_keep_stable_first_source() {
         let inventories = vec![
-            agent("codex", vec![skill("mine", "/codex/mine")]),
+            agent("codex-cli", vec![skill("mine", "/codex/mine")]),
             agent("b-agent", vec![skill("shared", "/b/shared")]),
             agent("a-agent", vec![skill("shared", "/a/shared")]),
         ];

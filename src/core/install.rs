@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn install_result_output_distinguishes_update() {
         let rendered = render_install_result(&AgentInstallResult {
-            agent: "codex".to_string(),
+            agent: "codex-cli".to_string(),
             action: AgentInstallAction::Update,
             command: "sh -c installer".to_string(),
             exit_code: Some(0),
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn install_progress_output_is_short_and_staged() {
         let rendered = render_install_progress(&AgentInstallProgress {
-            agent: "codex".to_string(),
+            agent: "codex-cli".to_string(),
             action: AgentInstallAction::Install,
             current: 2,
             total: 3,
@@ -176,7 +176,7 @@ mod tests {
             stage: AgentInstallProgressStage::Trying,
         });
 
-        assert_eq!(rendered, "  [2/3] Try WinGet\n  Target: codex");
+        assert_eq!(rendered, "  [2/3] Try WinGet\n  Target: codex-cli");
         assert!(!rendered.contains("command:"));
     }
 
