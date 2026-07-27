@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/flash-dev-ctrl/sentra-cli?include_prereleases)](https://github.com/flash-dev-ctrl/sentra-cli/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Sentra CLI discovers and scans local AI Agent assets. It supports Codex, Claude, Kimi, OpenClaw, Hermes, Sentra, and related Agent resources such as skills, providers, memory, and cron entries. Kimi's three surfaces use the canonical names `kimi-app`, `kimi-cli`, and `kimi-cli-ide`; the legacy inputs `kimi` and `kimi-code` remain CLI aliases.
+Sentra CLI discovers and scans local AI Agent assets. It supports Codex, Claude, Kimi, Trae, OpenClaw, Hermes, Sentra, and related Agent resources such as skills, providers, memory, and cron entries. Trae family surfaces use the canonical names `trae-ide`, `trae-cn-ide`, `trae-work`, `trae-cn-work`, and `trae-vscode-plugin`; the legacy and shorthand inputs `trae`, `trae-cn`, and `traework` remain CLI aliases. Kimi's three surfaces use the canonical names `kimi-app`, `kimi-cli`, and `kimi-cli-ide`; the legacy inputs `kimi` and `kimi-code` remain CLI aliases.
 
 The repository contains two Rust components:
 

@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Improved cron terminal output by showing task names and single-line prompt previews.
 - Updated Qoder and CodeBuddy product family discovery and Cursor cron support.
 - Renamed Kimi App display metadata to Kimi Work.
+- Added Trae family discovery for Trae IDE, Trae CN IDE, Trae Work, and the TRAE VS Code plugin.
 
 ## 0.2.6
 
