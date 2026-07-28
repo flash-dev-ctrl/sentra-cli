@@ -284,6 +284,16 @@ fn is_install_target(agent: &str) -> bool {
             | "qoderwork"
             | "qoder-work"
             | "trae"
+            | "trae-ide"
+            | "trae-cn"
+            | "trae-cn-ide"
+            | "traework"
+            | "trae-work"
+            | "trae-solo"
+            | "traeworkcn"
+            | "trae-cn-work"
+            | "trae-work-cn"
+            | "trae-solo-cn"
             | "vscode"
             | "workbuddy"
     )
@@ -701,6 +711,10 @@ mod tests {
             "qoder-cli",
             "qoder-work",
             "trae",
+            "trae-ide",
+            "trae-cn-ide",
+            "trae-work",
+            "trae-cn-work",
             "vscode",
             "workbuddy",
         ] {
@@ -720,6 +734,21 @@ mod tests {
     #[test]
     fn install_command_accepts_legacy_codebuddy_aliases() {
         for target in ["codebuddy", "codebuddy-code"] {
+            let command = parse_args(os_args(&["install", target])).unwrap();
+            assert!(matches!(command, Command::Install { agent } if agent == target));
+        }
+    }
+
+    #[test]
+    fn install_command_accepts_trae_aliases() {
+        for target in [
+            "trae-cn",
+            "traework",
+            "trae-solo",
+            "traeworkcn",
+            "trae-work-cn",
+            "trae-solo-cn",
+        ] {
             let command = parse_args(os_args(&["install", target])).unwrap();
             assert!(matches!(command, Command::Install { agent } if agent == target));
         }
@@ -756,6 +785,10 @@ mod tests {
             "qoder-cli",
             "qoder-work",
             "trae",
+            "trae-ide",
+            "trae-cn-ide",
+            "trae-work",
+            "trae-cn-work",
             "vscode",
             "workbuddy",
         ] {
@@ -779,6 +812,23 @@ mod tests {
     #[test]
     fn uninstall_command_accepts_legacy_codebuddy_aliases() {
         for target in ["codebuddy", "codebuddy-code"] {
+            let command = parse_args(os_args(&["uninstall", target])).unwrap();
+            assert!(
+                matches!(command, Command::Uninstall { agent, force: false } if agent == target)
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_command_accepts_trae_aliases() {
+        for target in [
+            "trae-cn",
+            "traework",
+            "trae-solo",
+            "traeworkcn",
+            "trae-work-cn",
+            "trae-solo-cn",
+        ] {
             let command = parse_args(os_args(&["uninstall", target])).unwrap();
             assert!(
                 matches!(command, Command::Uninstall { agent, force: false } if agent == target)
@@ -1421,12 +1471,12 @@ Description:
 
 Agents:
   All platforms:  codebuddy-cli, codex-cli, kimi-cli, opencode, pi
-  Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
-  macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
-  Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode
-  Platform blocked: qoder-work, workbuddy (Linux)
+  Windows WinGet: antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae-ide, trae-cn-ide, trae-work, trae-cn-work, vscode, workbuddy
+  macOS:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae-ide, vscode, workbuddy
+  Linux:          antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae-ide, vscode
+  Platform blocked: qoder-work, workbuddy (Linux); trae-cn-ide, trae-work, trae-cn-work (macOS/Linux)
   Source blocked on every platform: lingcode, marvis
-  Aliases: codebuddy, codebuddy-code -> codebuddy-cli; kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
+  Aliases: codebuddy, codebuddy-code -> codebuddy-cli; kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work; trae -> trae-ide; trae-cn -> trae-cn-ide; traework, trae-solo -> trae-work; traeworkcn, trae-work-cn, trae-solo-cn -> trae-cn-work
   Agent filter aliases: qoderclicn, lingma -> qoder-cn-cli
 
 Options:
@@ -1445,12 +1495,12 @@ Examples:
 
 Agent:
   全平台:          codebuddy-cli、codex-cli、kimi-cli、opencode、pi
-  Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
-  macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
-  Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae、vscode
-  平台未发布:      qoder-work、workbuddy（Linux）
+  Windows WinGet: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae-ide、trae-cn-ide、trae-work、trae-cn-work、vscode、workbuddy
+  macOS:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae-ide、vscode、workbuddy
+  Linux:          antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae-ide、vscode
+  平台未发布:      qoder-work、workbuddy（Linux）；trae-cn-ide、trae-work、trae-cn-work（macOS/Linux）
   全平台可信来源暂不可用: lingcode、marvis
-  别名: codebuddy、codebuddy-code -> codebuddy-cli；kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
+  别名: codebuddy、codebuddy-code -> codebuddy-cli；kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work；trae -> trae-ide；trae-cn -> trae-cn-ide；traework、trae-solo -> trae-work；traeworkcn、trae-work-cn、trae-solo-cn -> trae-cn-work
   Agent 过滤别名: qoderclicn、lingma -> qoder-cn-cli
 
 选项:
@@ -1477,12 +1527,12 @@ Description:
 
 Agents:
   All platforms: codebuddy-cli, codex-cli, kimi-cli, opencode, pi
-  Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
-  macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae, vscode, workbuddy
-  Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode
-  Platform blocked: qoder-work, workbuddy (Linux)
+  Windows:       antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae-ide, trae-cn-ide, trae-work, trae-cn-work, vscode, workbuddy
+  macOS:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, qoder-work, trae-ide, vscode, workbuddy
+  Linux:         antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae-ide, vscode
+  Platform blocked: qoder-work, workbuddy (Linux); trae-cn-ide, trae-work, trae-cn-work (macOS/Linux)
   Source blocked on every platform: lingcode, marvis
-  Aliases: codebuddy, codebuddy-code -> codebuddy-cli; kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work
+  Aliases: codebuddy, codebuddy-code -> codebuddy-cli; kimi, kimi-code -> kimi-cli; qoder -> qoder-cli; qoderwork -> qoder-work; trae -> trae-ide; trae-cn -> trae-cn-ide; traework, trae-solo -> trae-work; traeworkcn, trae-work-cn, trae-solo-cn -> trae-cn-work
   Agent filter aliases: qoderclicn, lingma -> qoder-cn-cli
 
 Options:
@@ -1502,12 +1552,12 @@ Examples:
 
 Agent:
   全平台:  codebuddy-cli、codex-cli、kimi-cli、opencode、pi
-  Windows: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
-  macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae、vscode、workbuddy
-  Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae、vscode
-  平台未发布: qoder-work、workbuddy（Linux）
+  Windows: antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae-ide、trae-cn-ide、trae-work、trae-cn-work、vscode、workbuddy
+  macOS:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、qoder-work、trae-ide、vscode、workbuddy
+  Linux:   antigravity、claude-cli、coder、cursor、kiro、qoder-cli、trae-ide、vscode
+  平台未发布: qoder-work、workbuddy（Linux）；trae-cn-ide、trae-work、trae-cn-work（macOS/Linux）
   全平台可信来源暂不可用: lingcode、marvis
-  别名: codebuddy、codebuddy-code -> codebuddy-cli；kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work
+  别名: codebuddy、codebuddy-code -> codebuddy-cli；kimi、kimi-code -> kimi-cli；qoder -> qoder-cli；qoderwork -> qoder-work；trae -> trae-ide；trae-cn -> trae-cn-ide；traework、trae-solo -> trae-work；traeworkcn、trae-work-cn、trae-solo-cn -> trae-cn-work
   Agent 过滤别名: qoderclicn、lingma -> qoder-cn-cli
 
 选项:

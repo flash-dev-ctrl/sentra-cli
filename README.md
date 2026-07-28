@@ -6,7 +6,7 @@
 
 [English](README.en.md)
 
-Sentra CLI 是一个面向本机 AI Agent 资产的发现与风险扫描工具。它可以发现 Codex、Claude、Kimi、OpenClaw、Hermes、Sentra 等 Agent 的 Skill、Provider、Memory、Cron 等资产，并使用本地规则、在线威胁情报和可选 LLM 进行安全审计。Kimi 的三种形态使用规范名 `kimi-app`、`kimi-cli` 和 `kimi-cli-ide`；旧名 `kimi`、`kimi-code` 仍可作为 CLI 输入别名。
+Sentra CLI 是一个面向本机 AI Agent 资产的发现与风险扫描工具。它可以发现 Codex、Claude、Kimi、Trae、OpenClaw、Hermes、Sentra 等 Agent 的 Skill、Provider、Memory、Cron 等资产，并使用本地规则、在线威胁情报和可选 LLM 进行安全审计。Trae 系列使用规范名 `trae-ide`、`trae-cn-ide`、`trae-work`、`trae-cn-work` 和 `trae-vscode-plugin`；旧名和简称 `trae`、`trae-cn`、`traework` 等仍可作为 CLI 输入别名。Kimi 的三种形态使用规范名 `kimi-app`、`kimi-cli` 和 `kimi-cli-ide`；旧名 `kimi`、`kimi-code` 仍可作为 CLI 输入别名。
 
 项目由两部分组成：
 

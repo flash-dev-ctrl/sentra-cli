@@ -13,6 +13,14 @@ const CODEBUDDY_AGENT_FAMILY: &[&str] = &[
     "codebuddy-cli-ide",
     "workbuddy",
 ];
+const TRAE_AGENT_FAMILY: &[&str] = &[
+    "trae-ide",
+    "trae-cn-ide",
+    "trae-work",
+    "trae-cn-work",
+    "trae-vscode-plugin",
+];
+const TRAE_CN_AGENT_FAMILY: &[&str] = &["trae-cn-ide", "trae-cn-work"];
 
 pub(crate) fn agent_matches(filter: &str, agent_name: &str) -> bool {
     canonical_agent_filter(filter).is_some_and(|filter| {
@@ -20,6 +28,8 @@ pub(crate) fn agent_matches(filter: &str, agent_name: &str) -> bool {
             || filter == "claude" && agent_name.starts_with("claude-")
             || filter == "qoder" && QODER_AGENT_FAMILY.contains(&agent_name)
             || filter == "codebuddy" && CODEBUDDY_AGENT_FAMILY.contains(&agent_name)
+            || filter == "trae" && TRAE_AGENT_FAMILY.contains(&agent_name)
+            || filter == "trae-cn" && TRAE_CN_AGENT_FAMILY.contains(&agent_name)
     })
 }
 
@@ -28,6 +38,8 @@ pub(crate) fn canonical_agent_target(target: &str) -> Option<&str> {
         "claude" => Some("claude-cli"),
         "qoder" => Some("qoder-cli"),
         "codebuddy" => Some("codebuddy-cli"),
+        "trae" => Some("trae-ide"),
+        "trae-cn" => Some("trae-cn-ide"),
         target => Some(target),
     }
 }
@@ -50,6 +62,13 @@ fn canonical_agent_filter(filter: &str) -> Option<&str> {
         "codebuddy-ide" => Some("codebuddy-ide"),
         "codebuddy-cn" | "codebuddycn" | "codebuddy-cn-ide" => Some("codebuddy-cn-ide"),
         "codebuddy-cli-ide" => Some("codebuddy-cli-ide"),
+        "trae" => Some("trae"),
+        "trae-ide" => Some("trae-ide"),
+        "trae-cn" => Some("trae-cn"),
+        "trae-cn-ide" => Some("trae-cn-ide"),
+        "traework" | "trae-work" | "trae-solo" => Some("trae-work"),
+        "traeworkcn" | "trae-cn-work" | "trae-work-cn" | "trae-solo-cn" => Some("trae-cn-work"),
+        "trae-plugin" | "trae-ide-plugin" | "trae-vscode-plugin" => Some("trae-vscode-plugin"),
         "qocder-cli" | "qcoder-app" | "qoder-app" => None,
         other => Some(other),
     }
@@ -104,6 +123,20 @@ mod tests {
         assert!(agent_matches("codebuddy-cn", "codebuddy-cn-ide"));
         assert!(agent_matches("codebuddycn", "codebuddy-cn-ide"));
         assert!(agent_matches("codebuddy-cli-ide", "codebuddy-cli-ide"));
+        assert!(agent_matches("trae", "trae-ide"));
+        assert!(agent_matches("trae", "trae-cn-ide"));
+        assert!(agent_matches("trae", "trae-work"));
+        assert!(agent_matches("trae", "trae-cn-work"));
+        assert!(agent_matches("trae", "trae-vscode-plugin"));
+        assert!(agent_matches("trae-ide", "trae-ide"));
+        assert!(agent_matches("trae-cn", "trae-cn-ide"));
+        assert!(agent_matches("trae-cn", "trae-cn-work"));
+        assert!(agent_matches("traework", "trae-work"));
+        assert!(agent_matches("trae-solo", "trae-work"));
+        assert!(agent_matches("traeworkcn", "trae-cn-work"));
+        assert!(agent_matches("trae-work-cn", "trae-cn-work"));
+        assert!(agent_matches("trae-solo-cn", "trae-cn-work"));
+        assert!(agent_matches("trae-plugin", "trae-vscode-plugin"));
     }
 
     #[test]
@@ -113,6 +146,8 @@ mod tests {
         assert!(!agent_matches("qoder-app", "qoder-work"));
         assert!(!agent_matches("qoder-cli", "qoder-work"));
         assert!(!agent_matches("codebuddy-cli", "codebuddy-ide"));
+        assert!(!agent_matches("trae-cn", "trae-ide"));
+        assert!(!agent_matches("trae-work", "trae-cn-work"));
     }
 
     #[test]
@@ -144,6 +179,16 @@ mod tests {
         assert_eq!(
             canonical_agent_target("codebuddy-cli-ide"),
             Some("codebuddy-cli-ide")
+        );
+        assert_eq!(canonical_agent_target("trae"), Some("trae-ide"));
+        assert_eq!(canonical_agent_target("trae-cn"), Some("trae-cn-ide"));
+        assert_eq!(canonical_agent_target("traework"), Some("trae-work"));
+        assert_eq!(canonical_agent_target("trae-solo"), Some("trae-work"));
+        assert_eq!(canonical_agent_target("traeworkcn"), Some("trae-cn-work"));
+        assert_eq!(canonical_agent_target("trae-work-cn"), Some("trae-cn-work"));
+        assert_eq!(
+            canonical_agent_target("trae-plugin"),
+            Some("trae-vscode-plugin")
         );
     }
 }

@@ -279,6 +279,76 @@ fn kimi_surfaces_sentra_list_agent_outputs_canonical_names() {
 }
 
 #[test]
+fn trae_surfaces_sentra_list_agent_outputs_canonical_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let app_root = dir.path().join("AppData").join("Roaming").join("Trae");
+    fs::create_dir_all(app_root.join("User")).unwrap();
+    let trae_home = dir.path().join(".trae");
+    fs::create_dir_all(trae_home.join("builtin").join("work")).unwrap();
+    fs::write(
+        trae_home.join("builtin").join("ide_version.json"),
+        r#"{"version":"1.0.23","releaseDate":"2026-05-12"}"#,
+    )
+    .unwrap();
+    let cn_app_root = dir.path().join("AppData").join("Roaming").join("Trae CN");
+    fs::create_dir_all(cn_app_root.join("User")).unwrap();
+    let cn_home = dir.path().join(".trae-cn");
+    fs::create_dir_all(cn_home.join("builtin").join("work")).unwrap();
+
+    let extension = dir
+        .path()
+        .join(".vscode")
+        .join("extensions")
+        .join("marscode.marscode-extension-1.7.3");
+    fs::create_dir_all(&extension).unwrap();
+    fs::write(
+        extension.join("package.json"),
+        r#"{"name":"marscode-extension","publisher":"MarsCode","displayName":"TRAE AI: Coding Assistant"}"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "agent", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let agents = value.as_array().unwrap();
+
+    assert!(
+        agents
+            .iter()
+            .any(|agent| { agent["name"] == "trae-ide" && agent["title"] == "Trae IDE" })
+    );
+    assert!(
+        agents
+            .iter()
+            .any(|agent| { agent["name"] == "trae-cn-ide" && agent["title"] == "Trae CN IDE" })
+    );
+    assert!(
+        agents
+            .iter()
+            .any(|agent| { agent["name"] == "trae-work" && agent["title"] == "Trae Work" })
+    );
+    assert!(
+        agents
+            .iter()
+            .any(|agent| { agent["name"] == "trae-cn-work" && agent["title"] == "Trae CN Work" })
+    );
+    assert!(agents.iter().any(|agent| {
+        agent["name"] == "trae-vscode-plugin" && agent["title"] == "TRAE VS Code Plugin"
+    }));
+    assert!(!agents.iter().any(|agent| agent["name"] == "trae"));
+}
+
+#[test]
 fn sentra_list_writes_json_to_output_file() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".codex")).unwrap();
@@ -2912,10 +2982,12 @@ fn sentra_agent_install_help_lists_cross_platform_support() {
         assert!(stdout.lines().any(|line| {
             line.trim_start().starts_with("Linux:")
                 && line.contains(
-                    "antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae, vscode",
+                    "antigravity, claude-cli, coder, cursor, kiro, qoder-cli, trae-ide, vscode",
                 )
         }));
         assert!(stdout.contains("qoder-work, workbuddy (Linux)"));
+        assert!(stdout.contains("trae-cn-ide, trae-work, trae-cn-work (macOS/Linux)"));
+        assert!(stdout.contains("trae -> trae-ide"));
     }
 }
 
