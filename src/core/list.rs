@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use sentra_lib::interfaces::AssetType;
+use sentra_lib::interfaces::{AssetType, McpData};
 use sentra_lib::{
     SentraError, SentraResult,
     agents::{Agent, discover_agents},
@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::cli::args::{ListResource, OutputOptions};
 use crate::cli::i18n::t;
 use crate::cli::output::write_output;
-use crate::core::agent_filter::agent_matches;
+use crate::core::agent_filter::{agent_matches, canonical_agent_target};
 
 const ALL_ASSET_TYPES: &[AssetType] = &[
     AssetType::Skill,
@@ -49,6 +49,10 @@ async fn asset_records(
     agent_filter: Option<&str>,
     asset_types: &[AssetType],
 ) -> SentraResult<Vec<AssetRecord>> {
+    if let Some(records) = direct_mcp_asset_records(home, agent_filter, asset_types)? {
+        return Ok(records);
+    }
+
     let agents = discover_agents(home)
         .into_iter()
         .filter(|agent| agent_filter.is_none_or(|filter| agent_matches(filter, agent.name())))
@@ -59,8 +63,7 @@ async fn asset_records(
             let agent_title = agent.title().to_string();
             for asset in agent.get_assets(requested_type)? {
                 let asset_type = asset.asset_type();
-                let data = serde_json::to_value(asset.data_async().await?)
-                    .map_err(|err| SentraError::Message(err.to_string()))?;
+                let data = hydrate_asset_data(asset_type, asset.data_async().await?)?;
                 if data.as_array().is_some_and(|items| items.is_empty()) {
                     continue;
                 }
@@ -76,6 +79,62 @@ async fn asset_records(
         }
     }
     Ok(records)
+}
+
+fn hydrate_asset_data(asset_type: AssetType, data: Value) -> SentraResult<Value> {
+    if !matches!(asset_type, AssetType::Mcp) {
+        return Ok(data);
+    }
+    let items = serde_json::from_value::<Vec<McpData>>(data)
+        .map_err(|err| SentraError::Message(err.to_string()))?
+        .into_iter()
+        .map(sentra_lib::hydrate_mcp_tools)
+        .collect::<Vec<_>>();
+    serde_json::to_value(items).map_err(|err| SentraError::Message(err.to_string()))
+}
+
+fn direct_mcp_asset_records(
+    home: &Path,
+    agent_filter: Option<&str>,
+    asset_types: &[AssetType],
+) -> SentraResult<Option<Vec<AssetRecord>>> {
+    if asset_types != [AssetType::Mcp] {
+        return Ok(None);
+    }
+    if let Some(filter) = agent_filter
+        && !matches!(canonical_agent_target(filter), Some("codex-cli"))
+    {
+        return Ok(None);
+    }
+    let agent_home = home.join(".codex");
+    let path = agent_home.join("config.toml");
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Ok(Some(Vec::new()));
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&content) else {
+        return Ok(Some(Vec::new()));
+    };
+    let json = serde_json::to_value(value).map_err(|err| SentraError::Message(err.to_string()))?;
+    let raw = json
+        .get("mcp_servers")
+        .unwrap_or(&serde_json::Value::Null)
+        .to_string();
+    let items = sentra_lib::parse_mcp_servers_json(&raw, None)?
+        .into_iter()
+        .map(sentra_lib::hydrate_mcp_tools)
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let data = serde_json::to_value(items).map_err(|err| SentraError::Message(err.to_string()))?;
+    Ok(Some(vec![AssetRecord {
+        asset_type: AssetType::Mcp,
+        kind: AssetType::Mcp,
+        agent_name: "codex-cli".to_string(),
+        agent_title: "Codex CLI".to_string(),
+        agent_home,
+        data,
+    }]))
 }
 
 pub(crate) fn resolve_home(home: Option<&Path>) -> SentraResult<PathBuf> {

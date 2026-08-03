@@ -3766,6 +3766,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "unicode-width",
  "ureq",
  "walkdir",

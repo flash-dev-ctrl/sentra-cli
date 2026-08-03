@@ -14,6 +14,14 @@ fn account_home_fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/provider")
 }
 
+fn agent_home_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/home")
+}
+
+fn copy_agent_home_fixture(home: &Path) {
+    copy_dir_recursive(&agent_home_fixture(), home);
+}
+
 fn write_codex_provider_fixture(home: &Path) -> serde_json::Value {
     let codex_home = home.join(".codex");
     fs::create_dir_all(&codex_home).unwrap();
@@ -1280,6 +1288,102 @@ fn kimi_cli_sentra_list_mcp_outputs_json() {
 }
 
 #[test]
+fn codex_cli_sentra_list_mcp_uses_home_fixture() {
+    let dir = tempfile::tempdir().unwrap();
+    copy_agent_home_fixture(dir.path());
+
+    let output = sentra_command()
+        .args(["list", "mcp", "--agent", "codex-cli", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("secret-token"));
+    assert!(!stdout.contains("sk-secret"));
+    assert!(!stdout.contains("sse-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+    let asset = assets
+        .iter()
+        .find(|asset| asset["agentName"] == "codex-cli")
+        .expect("missing codex-cli MCP fixture asset");
+    let servers = asset["data"].as_array().unwrap();
+    let stdio = servers
+        .iter()
+        .find(|server| server["name"] == "suspicious-stdio")
+        .expect("missing stdio MCP fixture server");
+    let sse = servers
+        .iter()
+        .find(|server| server["name"] == "malicious-sse-demo")
+        .expect("missing SSE MCP fixture server");
+    let heroui = servers
+        .iter()
+        .find(|server| server["name"] == "heroui-migration")
+        .expect("missing HeroUI MCP fixture server");
+
+    assert_eq!(asset["assetType"], "mcp");
+    assert_eq!(stdio["type"], "stdio");
+    assert!(stdio["env"].is_null());
+    assert_eq!(sse["type"], "sse");
+    assert_eq!(sse["url"], "http://127.0.0.1:3100");
+    assert_eq!(heroui["type"], "http");
+    assert_eq!(heroui["url"], "https://migration-mcp.heroui.com");
+}
+
+#[test]
+fn sentra_list_mcp_hydrates_remote_tools() {
+    let server = run_json_server(
+        r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup_docs","description":"Look up component docs","inputSchema":{"type":"object"}}]}}"#,
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "[mcp_servers.docs]\ntype = \"http\"\nurl = \"{}\"\n",
+            server.base_url
+        ),
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args([
+            "list",
+            "mcp",
+            "--home",
+            dir.path().to_str().unwrap(),
+            "--agent",
+            "codex-cli",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let request = server.request();
+    assert_eq!(request.path, "/");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+    let tools = assets[0]["data"][0]["tools"].as_array().unwrap();
+    assert_eq!(tools[0]["name"], "lookup_docs");
+    assert_eq!(tools[0]["description"], "Look up component docs");
+    assert_eq!(tools[0]["parameters"]["type"], "object");
+}
+
+#[test]
 fn sentra_scan_skill_scans_all_agents_by_default() {
     let dir = tempfile::tempdir().unwrap();
     write_skill(dir.path(), ".codex", "codex-demo");
@@ -2301,6 +2405,96 @@ fn sentra_scan_provider_accepts_account_type_provider_without_base_url() {
 }
 
 #[test]
+fn sentra_scan_mcp_scans_agent_mcp_assets_without_leaking_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    copy_agent_home_fixture(dir.path());
+    fs::write(
+        dir.path().join(".codex").join("config.toml"),
+        r#"[mcp_servers.risky]
+command = "bash"
+args = ["-c", "echo mcp-risk-marker", "--token", "secret-token"]
+
+[mcp_servers.risky.env]
+API_KEY = "sk-secret"
+REGION = "us-east-1"
+"#,
+    )
+    .unwrap();
+    write_yara_rule(dir.path(), "McpRiskMarker", "mcp-risk-marker");
+
+    let output = sentra_command()
+        .args([
+            "scan",
+            "mcp",
+            "--home",
+            dir.path().to_str().unwrap(),
+            "--agent",
+            "codex-cli",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("secret-token"));
+    assert!(!stdout.contains("sk-secret"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let scans = value.as_array().unwrap();
+
+    let scan = scans
+        .iter()
+        .find(|scan| scan["agent"] == "codex-cli" && scan["name"] == "risky")
+        .expect("missing codex-cli MCP scan");
+    assert_eq!(scan["type"], "mcp");
+    assert!(scan.get("data").is_none());
+    assert_eq!(scan["report"]["metadata"]["scanner"], "mcp-scanner");
+    assert!(scan["report"]["findings"].as_array().unwrap().is_empty());
+    assert!(scan["report"]["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn sentra_scan_mcp_terminal_output_includes_mcp_summary_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        codex_home.join("config.toml"),
+        "[mcp_servers.risky]\ncommand = \"mcp-risk-marker\"\n",
+    )
+    .unwrap();
+    write_yara_rule(dir.path(), "McpRiskMarker", "mcp-risk-marker");
+
+    let output = sentra_command()
+        .args([
+            "scan",
+            "mcp",
+            "--home",
+            dir.path().to_str().unwrap(),
+            "--agent",
+            "codex-cli",
+        ])
+        .env("SENTRA_LANG", "en")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Audit complete"), "{stdout}");
+    assert!(stdout.contains("Risky assets: 0/1"), "{stdout}");
+    assert!(stdout.contains("Findings: none"), "{stdout}");
+}
+
+#[test]
 fn sentra_scan_skill_loads_rules_from_sentra_config() {
     let dir = tempfile::tempdir().unwrap();
     let rules_dir = dir.path().join("rules");
@@ -3131,6 +3325,20 @@ fn contains_file(dir: &std::path::Path) -> bool {
         }
     }
     false
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) {
+    fs::create_dir_all(target).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &target_path);
+        } else {
+            fs::copy(&source_path, &target_path).unwrap();
+        }
+    }
 }
 
 fn sentra_command() -> Command {

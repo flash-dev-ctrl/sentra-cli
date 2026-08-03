@@ -28,6 +28,7 @@ pub(crate) enum Command {
     },
     Scan {
         resource: ScanResource,
+        home: Option<PathBuf>,
         path: Option<PathBuf>,
         agents: Vec<String>,
         enabled_checkers: BTreeSet<ScanChecker>,
@@ -75,6 +76,7 @@ pub(crate) enum ListResource {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ScanResource {
     Skill,
+    Mcp,
     Cron,
     Memory,
     Provider,
@@ -84,6 +86,7 @@ impl fmt::Display for ScanResource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::Skill => "skill",
+            Self::Mcp => "mcp",
             Self::Cron => "cron",
             Self::Memory => "memory",
             Self::Provider => "provider",
@@ -500,7 +503,7 @@ fn parse_scan(args: &[OsString]) -> SentraResult<Command> {
         })?
         .to_string_lossy();
     let resource = parse_scan_resource(&resource)?;
-    let (path, agents, enabled_checkers, no_cache, output) = parse_scan_options(&args[1..])?;
+    let (home, path, agents, enabled_checkers, no_cache, output) = parse_scan_options(&args[1..])?;
     if path.is_some() && !matches!(resource, ScanResource::Skill) {
         return Err(SentraError::Message(format!(
             "{} {resource} {}",
@@ -510,6 +513,7 @@ fn parse_scan(args: &[OsString]) -> SentraResult<Command> {
     }
     Ok(Command::Scan {
         resource,
+        home,
         path,
         agents,
         enabled_checkers,
@@ -929,6 +933,29 @@ mod tests {
     }
 
     #[test]
+    fn scan_mcp_accepts_home_option() {
+        let command = parse_args(os_args(&[
+            "scan",
+            "mcp",
+            "--home",
+            "fixtures/home",
+            "--agent",
+            "codex-cli",
+        ]))
+        .unwrap();
+
+        assert!(matches!(
+            command,
+            Command::Scan {
+                resource: ScanResource::Mcp,
+                home: Some(home),
+                agents,
+                ..
+            } if home == PathBuf::from("fixtures/home") && agents == vec!["codex-cli"]
+        ));
+    }
+
+    #[test]
     fn config_command_parses_get_set_and_del_actions() {
         let get = parse_args(os_args(&["config"])).unwrap();
         assert!(matches!(
@@ -1038,6 +1065,7 @@ fn parse_list_resource(resource: &str) -> SentraResult<ListResource> {
 fn parse_scan_resource(resource: &str) -> SentraResult<ScanResource> {
     match resource {
         "skill" => Ok(ScanResource::Skill),
+        "mcp" => Ok(ScanResource::Mcp),
         "cron" => Ok(ScanResource::Cron),
         "memory" => Ok(ScanResource::Memory),
         "provider" => Ok(ScanResource::Provider),
@@ -1232,11 +1260,13 @@ fn parse_scan_options(
     args: &[OsString],
 ) -> SentraResult<(
     Option<PathBuf>,
+    Option<PathBuf>,
     Vec<String>,
     BTreeSet<ScanChecker>,
     bool,
     OutputOptions,
 )> {
+    let mut home = None;
     let mut path = None;
     let mut agents = Vec::new();
     let mut enabled = default_scan_checkers();
@@ -1247,6 +1277,15 @@ fn parse_scan_options(
     while index < args.len() {
         let option = args[index].to_string_lossy();
         match option.as_ref() {
+            "--home" | "--agent-home" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(|| {
+                    SentraError::Message(
+                        t("missing value for --home", "缺少 --home 的值").to_string(),
+                    )
+                })?;
+                home = Some(PathBuf::from(value));
+            }
             "-a" | "--agent" => {
                 index += 1;
                 let value = args.get(index).ok_or_else(|| {
@@ -1321,7 +1360,7 @@ fn parse_scan_options(
         ));
     }
 
-    Ok((path, agents, enabled, no_cache, output))
+    Ok((home, path, agents, enabled, no_cache, output))
 }
 
 fn parse_skill_add_options(
@@ -1620,13 +1659,14 @@ pub(crate) fn print_scan_help() {
     println!("{}", t(
         "\
 Usage:
-  sentra scan <skill|cron|memory|provider> [path] [--agent <name> ...] [--format <terminal|json>] [--output <file>] [--with-xxx ...] [--without-xxx ...]
+  sentra scan <skill|mcp|cron|memory|provider> [path] [--home <path>] [--agent <name> ...] [--format <terminal|json>] [--output <file>] [--with-xxx ...] [--without-xxx ...]
 
 Description:
   Scan assets or a skill path for security risks.
 
 Options:
   -a, --agent <name>  Filter scans to one or more agents or families
+  --home <path>       Read agent homes and Sentra config under this user home
   -f, --format <fmt>  Output format: terminal, table, json
   -o, --output <file> Write command output to a file
   --llm               Enable LLM checker
@@ -1638,18 +1678,20 @@ Options:
 
 Examples:
   sentra scan skill
+  sentra scan mcp --home ./fixtures/home --agent codex-cli
   sentra scan skill ./fixtures/skill --with-llm
   sentra scan provider --agent codex-cli --format json"
     ,
         "\
 用法:
-  sentra scan <skill|cron|memory|provider> [路径] [--agent <名称> ...] [--format <terminal|json>] [--output <文件>] [--with-xxx ...] [--without-xxx ...]
+  sentra scan <skill|mcp|cron|memory|provider> [路径] [--home <路径>] [--agent <名称> ...] [--format <terminal|json>] [--output <文件>] [--with-xxx ...] [--without-xxx ...]
 
 说明:
   扫描资产或技能路径中的安全风险。
 
 选项:
   -a, --agent <名称> 按一个或多个 Agent 或家族过滤扫描
+  --home <路径>      从指定用户主目录读取 Agent 和 Sentra 配置
   -f, --format <格式> 输出格式: terminal, table, json
   -o, --output <文件> 将命令输出写入文件
   --llm              启用 LLM 检查器
@@ -1661,6 +1703,7 @@ Examples:
 
 示例:
   sentra scan skill
+  sentra scan mcp --home ./fixtures/home --agent codex-cli
   sentra scan skill ./fixtures/skill --with-llm
   sentra scan provider --agent codex-cli --format json"
     ));
