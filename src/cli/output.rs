@@ -1756,9 +1756,9 @@ mod tests {
 
         let output = format_assets(&value, true);
 
-        assert!(output.contains("\u{1b}[38;2;184;190;202mList cron tasks\u{1b}[0m"));
-        assert!(output.contains("\u{1b}[38;2;100;109;122mAGENT\u{1b}[0m"));
-        assert!(output.contains("\u{1b}[38;2;142;152;168mclaude-app\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[38;2;235;239;245m"));
+        assert!(output.contains("\u{1b}[38;2;139;149;163mAGENT\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[38;2;179;187;198mclaude-app\u{1b}[0m"));
         assert!(!output.contains("\u{1b}[97m"));
         assert!(!output.contains("\u{1b}[1;97m"));
     }
@@ -1767,8 +1767,8 @@ mod tests {
     fn next_step_colon_is_part_of_muted_label() {
         let output = format_next_step("Next: `sentra scan cron`", true);
 
-        assert!(output.starts_with("\u{1b}[38;2;100;109;122mNext:\u{1b}[0m"));
-        assert!(output.contains("\u{1b}[38;2;142;152;168m `sentra scan cron`\u{1b}[0m"));
+        assert!(output.starts_with("\u{1b}[38;2;139;149;163mNext:\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[38;2;179;187;198m `sentra scan cron`\u{1b}[0m"));
         assert!(!output.contains("\u{1b}[0m:"));
     }
 
