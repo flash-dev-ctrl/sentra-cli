@@ -2,52 +2,23 @@
 
 sentra model
 
-界面
-左侧 agent
-中间 网关
-右侧 模型列表
+支持 CLI 配置，也可以进入 TUI 交互界面
 
-进入 tui 界面，弹出两个选择
-1. 第一个是配置模型：进入阶段二
-2. 第二个是配置网关
-    1. 配置网关 进入一个界面填充 url 和 key
-    2. 然后携带这个填入进入阶段一
+进入 TUI 后，先发现所有 agent 并收集所有 provider（复用已有代码），并显示支持配置 Provider 的 agent
 
-阶段一
-1. 构建 ProviderData
-2. 进入阶段二
+选择一个 agent 后，进入模型配置界面
 
-阶段二
-1. 收集 agent
-2. 从 agent 支持获取 ProviderData
-3. 进入阶段三
-
-阶段三
-1. 将 agent 与 ProviderData 组合
-2. 进入阶段四
-
-阶段四：模型切换界面
-1. 左侧显示采集的 agent（provider） 列表
-2. 右侧显示选中的 agent provider 的模型列表，包含统计数据，可用/总数（n/m）
-3. 后台实时测试模型可用性（并发，但是要限制并发数）
-4. 点击模型列表中的模型，切换模型
-5. 要保持状态，不能切换到其它 provider 就丢失当前状态
-6. 各个 agent（provider）独立测试，因为每个agent的探测算法不一样
-7. 切换到 agent（provider） 才开始探测
-8. 提示：通过易懂方式提示当前模型状态，比如：可用、不可用、测试中等
+左边显示采集到的所有 provider 包括其它 agent 的，右边显示该 provider 的模型列表
+该界面支持新增 provider，添加网关与Provider同级，点击后弹出对话框，填入 api 和 key 即可
 
 
-> key      ************     隐藏中间部分即可
-右侧模型列表不能滚动,需要添加序号，支持在可用模型之间快速跳转，而不仅仅只能上下滚动（因为可能由几百个模型
-配置模型右侧：可以有个类似广告条的状态提示，可以显示当前选中网关的完整url等
-网关列表每一项, 动态刷新可用模型占比：ai-api-gateway.app.baizhi.cloud (n/m)
+支持 ESC 返回上一级
+在模型配置界面，要高亮标明 agent 已配置的 provider，如果没有，则不用
+同时状态栏要显示光标所在模型的 api 和脱敏的 key
 
-
-  Select Model and Effort
-  Access legacy models by running codex -m <model_name> or in your config.toml
-
-  1. gpt-5.5 (default)  Frontier model for complex coding, research, and real-world work.
-› 2. gpt-5.4            Strong model for everyday coding.
-  3. gpt-5.4-mini       Small, fast, and cost-efficient model for simpler coding tasks.
-  4. gpt-5.3-codex      Coding-optimized model.
-  5. gpt-5.2            Optimized for professional work and long-running agents.
+# bug
+1. 光标选中需要改变背景色，现在只改变了字体颜色，并不能快速捕获用户视觉焦点
+2. sentra model 太慢了（修改sentra lib，给发现agent添加参数跳过安装探测，默认不跳过，进程探测只对又env的entry才生效），并且更新 provider 也很慢，我认为就是备份然后写入，应该一两秒就行
+3. 文字太乱了，需要美化一下，确保布局工整，尤其是Providers列表
+4. 随便添加的provider，models竟然有列表
+5. 界面没有显示当前正在配置的agent

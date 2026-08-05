@@ -14,13 +14,28 @@ pub(crate) fn secondary_style() -> Style {
 }
 
 pub(crate) fn title_style() -> Style {
-    Style::default().fg(token_color(Token::Primary))
+    Style::default()
+        .fg(token_color(Token::Primary))
+        .add_modifier(Modifier::BOLD)
 }
 
 pub(crate) fn focus_style() -> Style {
     Style::default()
         .fg(token_color(Token::Primary))
         .add_modifier(Modifier::BOLD)
+}
+
+pub(crate) fn selection_style() -> Style {
+    Style::default()
+        .fg(token_color(Token::SelectionForeground))
+        .bg(token_color(Token::SelectionBackground))
+        .add_modifier(Modifier::BOLD)
+}
+
+pub(crate) fn inactive_selection_style() -> Style {
+    Style::default()
+        .fg(token_color(Token::Foreground))
+        .bg(token_color(Token::InactiveSelectionBackground))
 }
 
 pub(crate) fn success_style() -> Style {
@@ -39,7 +54,7 @@ pub(crate) fn border_style(focused: bool) -> Style {
     if focused {
         Style::default().fg(token_color(Token::Primary))
     } else {
-        Style::default().fg(token_color(Token::Muted))
+        Style::default().fg(token_color(Token::Border))
     }
 }
 
@@ -111,14 +126,18 @@ fn token_color(token: Token) -> Color {
 
 fn rgb(token: Token) -> (u8, u8, u8) {
     match token {
-        Token::Foreground => (184, 190, 202),
-        Token::Primary => (123, 159, 200),
-        Token::Secondary => (142, 152, 168),
-        Token::Muted => (100, 109, 122),
-        Token::Success => (132, 179, 138),
-        Token::Warning => (202, 167, 95),
-        Token::Error => (204, 112, 112),
-        Token::Info => (111, 159, 189),
+        Token::Foreground => (235, 239, 245),
+        Token::Primary => (84, 169, 255),
+        Token::Secondary => (179, 187, 198),
+        Token::Muted => (139, 149, 163),
+        Token::Success => (115, 211, 152),
+        Token::Warning => (255, 190, 96),
+        Token::Error => (255, 92, 92),
+        Token::Info => (84, 169, 255),
+        Token::Border => (66, 145, 224),
+        Token::SelectionForeground => (247, 250, 255),
+        Token::SelectionBackground => (18, 64, 105),
+        Token::InactiveSelectionBackground => (14, 36, 58),
     }
 }
 
@@ -132,6 +151,10 @@ enum Token {
     Warning,
     Error,
     Info,
+    Border,
+    SelectionForeground,
+    SelectionBackground,
+    InactiveSelectionBackground,
 }
 
 #[cfg(test)]
@@ -140,20 +163,29 @@ mod tests {
 
     #[test]
     fn palette_uses_calm_dark_terminal_tokens() {
-        assert_eq!(token_color(Token::Foreground), Color::Rgb(184, 190, 202));
-        assert_eq!(token_color(Token::Primary), Color::Rgb(123, 159, 200));
-        assert_eq!(token_color(Token::Secondary), Color::Rgb(142, 152, 168));
-        assert_eq!(token_color(Token::Muted), Color::Rgb(100, 109, 122));
-        assert_eq!(token_color(Token::Success), Color::Rgb(132, 179, 138));
-        assert_eq!(token_color(Token::Warning), Color::Rgb(202, 167, 95));
-        assert_eq!(token_color(Token::Error), Color::Rgb(204, 112, 112));
+        assert_eq!(token_color(Token::Foreground), Color::Rgb(235, 239, 245));
+        assert_eq!(token_color(Token::Primary), Color::Rgb(84, 169, 255));
+        assert_eq!(token_color(Token::Secondary), Color::Rgb(179, 187, 198));
+        assert_eq!(token_color(Token::Muted), Color::Rgb(139, 149, 163));
+        assert_eq!(token_color(Token::Success), Color::Rgb(115, 211, 152));
+        assert_eq!(token_color(Token::Warning), Color::Rgb(255, 190, 96));
+        assert_eq!(token_color(Token::Error), Color::Rgb(255, 92, 92));
+        assert_eq!(token_color(Token::Border), Color::Rgb(66, 145, 224));
+        assert_eq!(
+            token_color(Token::SelectionBackground),
+            Color::Rgb(18, 64, 105)
+        );
+        assert_eq!(
+            token_color(Token::InactiveSelectionBackground),
+            Color::Rgb(14, 36, 58)
+        );
     }
 
     #[test]
     fn ansi_palette_avoids_bright_white() {
         let rendered = paint("ok", AnsiStyle::Green, true);
 
-        assert!(rendered.contains("\u{1b}[38;2;132;179;138m"));
+        assert!(rendered.contains("\u{1b}[38;2;115;211;152m"));
         assert!(!rendered.contains("\u{1b}[97m"));
         assert!(!rendered.contains("\u{1b}[1;97m"));
     }
