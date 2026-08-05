@@ -60,11 +60,28 @@ impl TestHttpServer {
         self.handle.join().unwrap();
         request
     }
+
+    fn assert_no_request(self) {
+        assert!(
+            self.rx.recv_timeout(Duration::from_millis(150)).is_err(),
+            "server received an unexpected request"
+        );
+        if let Some(addr) = self.base_url.strip_prefix("http://")
+            && let Ok(mut stream) = std::net::TcpStream::connect(addr)
+        {
+            use std::io::Write;
+
+            let _ = write!(
+                stream,
+                "GET /__sentra_test_shutdown HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+            );
+        }
+        self.handle.join().unwrap();
+    }
 }
 
 struct ObservedHttpRequest {
     path: String,
-    authorization: Option<String>,
 }
 
 fn run_json_server(response_body: &'static str) -> TestHttpServer {
@@ -83,7 +100,6 @@ fn run_json_server(response_body: &'static str) -> TestHttpServer {
             .nth(1)
             .unwrap_or_default()
             .to_string();
-        let mut authorization = None;
         let mut content_length = 0usize;
         loop {
             let mut line = String::new();
@@ -93,28 +109,21 @@ fn run_json_server(response_body: &'static str) -> TestHttpServer {
                 break;
             }
             if let Some((key, value)) = trimmed.split_once(':') {
-                if key.trim().eq_ignore_ascii_case("authorization") {
-                    authorization = Some(value.trim().to_string());
-                } else if key.trim().eq_ignore_ascii_case("content-length") {
+                if key.trim().eq_ignore_ascii_case("content-length") {
                     content_length = value.trim().parse().unwrap();
                 }
             }
         }
         let mut request_body = vec![0; content_length];
         reader.read_exact(&mut request_body).unwrap();
-        tx.send(ObservedHttpRequest {
-            path,
-            authorization,
-        })
-        .unwrap();
+        tx.send(ObservedHttpRequest { path }).unwrap();
 
-        write!(
+        let _ = write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             response_body.len(),
             response_body
-        )
-        .unwrap();
+        );
     });
     TestHttpServer {
         base_url,
@@ -1288,6 +1297,51 @@ fn kimi_cli_sentra_list_mcp_outputs_json() {
 }
 
 #[test]
+fn sentra_list_mcp_without_agent_filter_lists_all_agent_mcp_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        codex_home.join("config.toml"),
+        "[mcp_servers.codex]\ncommand = \"codex-mcp\"\n",
+    )
+    .unwrap();
+    let kimi_home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&kimi_home).unwrap();
+    fs::write(
+        kimi_home.join("mcp.json"),
+        r#"{"mcpServers":{"kimi":{"command":"kimi-mcp"}}}"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args(["list", "mcp", "--format", "json"])
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+
+    assert!(
+        assets
+            .iter()
+            .any(|asset| asset["agentName"] == "codex-cli" && asset["data"][0]["name"] == "codex")
+    );
+    assert!(
+        assets
+            .iter()
+            .any(|asset| asset["agentName"] == "kimi-cli" && asset["data"][0]["name"] == "kimi")
+    );
+}
+
+#[test]
 fn codex_cli_sentra_list_mcp_uses_home_fixture() {
     let dir = tempfile::tempdir().unwrap();
     copy_agent_home_fixture(dir.path());
@@ -1381,6 +1435,51 @@ fn sentra_list_mcp_hydrates_remote_tools() {
     assert_eq!(tools[0]["name"], "lookup_docs");
     assert_eq!(tools[0]["description"], "Look up component docs");
     assert_eq!(tools[0]["parameters"]["type"], "object");
+}
+
+#[test]
+fn sentra_list_all_does_not_hydrate_remote_mcp_tools() {
+    let server =
+        run_json_server(r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup_docs"}]}}"#);
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "[mcp_servers.docs]\ntype = \"http\"\nurl = \"{}\"\n",
+            server.base_url
+        ),
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args([
+            "list",
+            "--home",
+            dir.path().to_str().unwrap(),
+            "--agent",
+            "codex-cli",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.assert_no_request();
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let assets = value.as_array().unwrap();
+    let mcp = assets
+        .iter()
+        .find(|asset| asset["assetType"] == "mcp")
+        .expect("missing mcp asset");
+    let tools = mcp["data"][0]["tools"].as_array();
+    assert!(tools.is_none_or(|items| items.is_empty()));
 }
 
 #[test]
@@ -1587,7 +1686,7 @@ fn sentra_model_lists_gateway_providers_and_skips_account_type_providers() {
 }
 
 #[test]
-fn sentra_model_fetches_opencode_provider_models_with_runtime_api_key() {
+fn sentra_model_list_keeps_opencode_provider_models_local() {
     let dir = tempfile::tempdir().unwrap();
     let server =
         run_json_server(r#"{"data":[{"id":"fresh-gpt","name":"Fresh GPT"},{"id":"fresh-mini"}]}"#);
@@ -1629,12 +1728,7 @@ fn sentra_model_fetches_opencode_provider_models_with_runtime_api_key() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let request = server.request();
-    assert_eq!(request.path, "/models");
-    assert_eq!(
-        request.authorization.as_deref(),
-        Some("Bearer sk-opencode-secret")
-    );
+    server.assert_no_request();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("sk-opencode-secret"));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1644,12 +1738,12 @@ fn sentra_model_fetches_opencode_provider_models_with_runtime_api_key() {
             .iter()
             .any(|model| model["model"] == "configured-gpt")
     );
-    assert!(models.iter().any(|model| model["model"] == "fresh-gpt"));
-    assert!(models.iter().any(|model| model["model"] == "fresh-mini"));
+    assert!(!models.iter().any(|model| model["model"] == "fresh-gpt"));
+    assert!(!models.iter().any(|model| model["model"] == "fresh-mini"));
 }
 
 #[test]
-fn kimi_cli_sentra_model_fetches_provider_models_with_runtime_api_key() {
+fn kimi_cli_sentra_model_list_keeps_provider_models_local() {
     let dir = tempfile::tempdir().unwrap();
     let server = run_json_server(r#"{"data":[{"id":"kimi-fresh","name":"Kimi Fresh"}]}"#);
     let home = dir.path().join(".kimi-code");
@@ -1686,12 +1780,7 @@ model = "kimi-configured"
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let request = server.request();
-    assert_eq!(request.path, "/models");
-    assert_eq!(
-        request.authorization.as_deref(),
-        Some("Bearer sk-kimi-model-secret")
-    );
+    server.assert_no_request();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("sk-kimi-model-secret"));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1703,7 +1792,7 @@ model = "kimi-configured"
             && model["model"] == "kimi-configured"
     }));
     assert!(
-        models
+        !models
             .iter()
             .any(|model| { model["agentName"] == "kimi-cli" && model["model"] == "kimi-fresh" })
     );
@@ -2456,6 +2545,56 @@ REGION = "us-east-1"
     assert_eq!(scan["report"]["metadata"]["scanner"], "mcp-scanner");
     assert!(scan["report"]["findings"].as_array().unwrap().is_empty());
     assert!(scan["report"]["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn sentra_scan_mcp_without_agent_filter_scans_all_agent_mcp_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        codex_home.join("config.toml"),
+        "[mcp_servers.codex]\ncommand = \"codex-mcp\"\n",
+    )
+    .unwrap();
+    let kimi_home = dir.path().join(".kimi-code");
+    fs::create_dir_all(&kimi_home).unwrap();
+    fs::write(
+        kimi_home.join("mcp.json"),
+        r#"{"mcpServers":{"kimi":{"command":"kimi-mcp"}}}"#,
+    )
+    .unwrap();
+
+    let output = sentra_command()
+        .args([
+            "scan",
+            "mcp",
+            "--home",
+            dir.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let scans = value.as_array().unwrap();
+
+    assert!(
+        scans
+            .iter()
+            .any(|scan| scan["agent"] == "codex-cli" && scan["name"] == "codex")
+    );
+    assert!(
+        scans
+            .iter()
+            .any(|scan| scan["agent"] == "kimi-cli" && scan["name"] == "kimi")
+    );
 }
 
 #[test]

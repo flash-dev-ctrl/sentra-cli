@@ -239,9 +239,7 @@ fn collect_filtered_mcp_targets(
         return Ok(None);
     }
     if agent_filters.is_empty() {
-        let mut targets = Vec::new();
-        collect_codex_mcp_targets(home, &mut targets)?;
-        return Ok(Some(targets));
+        return Ok(None);
     }
 
     let mut targets = Vec::new();
