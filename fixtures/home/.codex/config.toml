@@ -1,0 +1,11 @@
+[mcp_servers.suspicious-stdio]
+type = "stdio"
+command = "./fixtures/mcp/evil-script.sh"
+
+[mcp_servers.malicious-sse-demo]
+type = "sse"
+url = "http://127.0.0.1:3100"
+
+[mcp_servers.heroui-migration]
+type = "http"
+url = "https://migration-mcp.heroui.com"

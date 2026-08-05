@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::StreamExt;
-use sentra_lib::interfaces::{AssetType, CronData, MemoryData, ProviderData, SkillData};
+use sentra_lib::interfaces::{AssetType, CronData, McpData, MemoryData, ProviderData, SkillData};
 use sentra_lib::risks::{RiskAsset, RiskScanner, ScanOptions, ScanReport};
 use sentra_lib::{SentraError, SentraResult, agents::discover_agents};
 use serde::Serialize;
@@ -14,7 +14,7 @@ use crate::cli::args::{OutputOptions, ScanChecker, ScanResource};
 use crate::cli::feedback::{self, Status};
 use crate::cli::i18n::t;
 use crate::cli::output::write_output;
-use crate::core::agent_filter::agent_matches;
+use crate::core::agent_filter::{agent_matches, canonical_agent_target};
 use crate::core::model;
 use crate::core::scan_support::{
     RuleLoadOutput, build_scan_options_with_cache, checker_selection, emit_scan_progress,
@@ -23,17 +23,17 @@ use crate::core::scan_support::{
 
 pub(crate) async fn run(
     resource: ScanResource,
+    home: &Path,
     path: Option<PathBuf>,
     agent_filters: Vec<String>,
     enabled_checkers: BTreeSet<ScanChecker>,
     no_cache: bool,
     output: OutputOptions,
 ) -> SentraResult<()> {
-    let home = current_home()?;
     let resource_name = resource.to_string();
     let mut reports = Vec::new();
     let checkers = checker_selection(&enabled_checkers);
-    let mut options = build_scan_options_with_cache(&home, &checkers, no_cache)?;
+    let mut options = build_scan_options_with_cache(home, &checkers, no_cache)?;
     feedback::context(
         t("Scan assets", "扫描资产"),
         &[
@@ -65,7 +65,7 @@ pub(crate) async fn run(
                 .to_string(),
             ));
         }
-        options = build_scan_options_with_cache(&home, &checkers, no_cache)?;
+        options = build_scan_options_with_cache(home, &checkers, no_cache)?;
         if !sentra_llm_config_complete(&options) {
             return Err(SentraError::Message(
                 t(
@@ -96,7 +96,7 @@ pub(crate) async fn run(
                 t("targets from agents", "目标，来源为 Agent")
             ),
         );
-        collect_agent_targets(resource, &home, &agent_filters).await?
+        collect_agent_targets(resource, home, &agent_filters).await?
     };
     feedback::phase(
         Status::Success,
@@ -187,6 +187,10 @@ async fn collect_agent_targets(
     home: &std::path::Path,
     agent_filters: &[String],
 ) -> SentraResult<Vec<ScanTarget>> {
+    if let Some(targets) = collect_filtered_mcp_targets(resource, home, agent_filters)? {
+        return Ok(targets);
+    }
+
     let mut targets = Vec::new();
     for agent in discover_agents(home) {
         if !agent_filters.is_empty()
@@ -224,6 +228,64 @@ async fn collect_agent_targets(
         }
     }
     Ok(targets)
+}
+
+fn collect_filtered_mcp_targets(
+    resource: ScanResource,
+    home: &std::path::Path,
+    agent_filters: &[String],
+) -> SentraResult<Option<Vec<ScanTarget>>> {
+    if !matches!(resource, ScanResource::Mcp) {
+        return Ok(None);
+    }
+    if agent_filters.is_empty() {
+        return Ok(None);
+    }
+
+    let mut targets = Vec::new();
+    for filter in agent_filters {
+        match canonical_agent_target(filter) {
+            Some("codex-cli") => collect_codex_mcp_targets(home, &mut targets)?,
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(targets))
+}
+
+fn collect_codex_mcp_targets(
+    home: &std::path::Path,
+    targets: &mut Vec<ScanTarget>,
+) -> SentraResult<()> {
+    let agent_home = home.join(".codex");
+    let path = agent_home.join("config.toml");
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&content) else {
+        return Ok(());
+    };
+    let json = serde_json::to_value(value).map_err(|err| SentraError::Message(err.to_string()))?;
+    let raw = json
+        .get("mcp_servers")
+        .unwrap_or(&serde_json::Value::Null)
+        .to_string();
+    let items = sentra_lib::parse_mcp_servers_json(&raw, None)?
+        .into_iter()
+        .map(sentra_lib::hydrate_mcp_tools)
+        .collect::<Vec<_>>();
+    let metadata = ScanTargetMetadata {
+        user: user_from_agent_home(&agent_home),
+        agent: "codex-cli".to_string(),
+        agent_title: "Codex CLI".to_string(),
+        agent_home,
+    };
+    targets.extend(items.into_iter().map(|mcp| {
+        ScanTarget::Mcp(McpScanTarget {
+            metadata: metadata.clone(),
+            mcp,
+        })
+    }));
+    Ok(())
 }
 
 async fn collect_path_skill_targets(path: PathBuf) -> SentraResult<Vec<ScanTarget>> {
@@ -295,6 +357,15 @@ fn push_agent_scan_targets(
                     }),
             );
         }
+        ScanResource::Mcp => {
+            targets.extend(parse_asset_items::<McpData>(data)?.into_iter().map(|mcp| {
+                let mcp = sentra_lib::hydrate_mcp_tools(mcp);
+                ScanTarget::Mcp(McpScanTarget {
+                    metadata: metadata.clone(),
+                    mcp,
+                })
+            }));
+        }
         ScanResource::Cron => {
             targets.extend(
                 parse_asset_items::<CronData>(data)?
@@ -342,22 +413,11 @@ fn parse_asset_items<TData: DeserializeOwned>(data: serde_json::Value) -> Sentra
 fn scan_asset_type(resource: ScanResource) -> AssetType {
     match resource {
         ScanResource::Skill => AssetType::Skill,
+        ScanResource::Mcp => AssetType::Mcp,
         ScanResource::Cron => AssetType::Cron,
         ScanResource::Memory => AssetType::Memory,
         ScanResource::Provider => AssetType::Provider,
     }
-}
-
-fn current_home() -> SentraResult<std::path::PathBuf> {
-    home::home_dir().ok_or_else(|| {
-        SentraError::Message(
-            t(
-                "could not determine current user home",
-                "无法确定当前用户主目录",
-            )
-            .to_string(),
-        )
-    })
 }
 
 fn should_prompt_for_sentra_model(
@@ -407,6 +467,7 @@ struct ScanTargetMetadata {
 
 enum ScanTarget {
     Skill(SkillScanTarget),
+    Mcp(McpScanTarget),
     Cron(CronScanTarget),
     Memory(MemoryScanTarget),
     Provider(ProviderScanTarget),
@@ -516,6 +577,7 @@ impl ScanTarget {
     fn asset_type(&self) -> AssetType {
         match self {
             Self::Skill(_) => AssetType::Skill,
+            Self::Mcp(_) => AssetType::Mcp,
             Self::Cron(_) => AssetType::Cron,
             Self::Memory(_) => AssetType::Memory,
             Self::Provider(_) => AssetType::Provider,
@@ -525,6 +587,7 @@ impl ScanTarget {
     fn metadata(&self) -> &ScanTargetMetadata {
         match self {
             Self::Skill(target) => &target.metadata,
+            Self::Mcp(target) => &target.metadata,
             Self::Cron(target) => &target.metadata,
             Self::Memory(target) => &target.metadata,
             Self::Provider(target) => &target.metadata,
@@ -534,6 +597,7 @@ impl ScanTarget {
     fn display_name(&self) -> &str {
         match self {
             Self::Skill(target) => &target.skill.name,
+            Self::Mcp(target) => &target.mcp.name,
             Self::Cron(target) => &target.cron.id,
             Self::Memory(target) => &target.memory.name,
             Self::Provider(target) => &target.provider.name,
@@ -543,6 +607,7 @@ impl ScanTarget {
     fn record_name(&self) -> &str {
         match self {
             Self::Skill(target) => &target.skill.name,
+            Self::Mcp(target) => &target.mcp.name,
             Self::Cron(target) if !target.cron.name.is_empty() => &target.cron.name,
             Self::Cron(target) => &target.cron.id,
             Self::Memory(target) => &target.memory.name,
@@ -553,6 +618,7 @@ impl ScanTarget {
     async fn scan(&self, scanner: &RiskScanner) -> SentraResult<ScanReport> {
         match self {
             Self::Skill(target) => scanner.scan(RiskAsset::from(&target.skill)).await,
+            Self::Mcp(target) => scanner.scan(RiskAsset::from(&target.mcp)).await,
             Self::Cron(target) => scanner.scan(RiskAsset::from(&target.cron)).await,
             Self::Memory(target) => scanner.scan(RiskAsset::from(&target.memory)).await,
             Self::Provider(target) => scanner.scan(RiskAsset::from(&target.provider)).await,
@@ -563,6 +629,11 @@ impl ScanTarget {
 struct SkillScanTarget {
     metadata: ScanTargetMetadata,
     skill: SkillData,
+}
+
+struct McpScanTarget {
+    metadata: ScanTargetMetadata,
+    mcp: McpData,
 }
 
 struct CronScanTarget {

@@ -101,15 +101,18 @@ async fn execute(command: &Command) -> SentraResult<()> {
         }
         Command::Scan {
             resource,
+            home,
             path,
             agents,
             enabled_checkers,
             no_cache,
             output,
         } => {
-            config::initialize()?;
+            let home = list::resolve_home(home.as_deref())?;
+            config::initialize_at(&home)?;
             scan::run(
                 *resource,
+                &home,
                 path.clone(),
                 agents.clone(),
                 enabled_checkers.clone(),

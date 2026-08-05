@@ -17,7 +17,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
-use sentra_lib::agents::discover_agents;
+use sentra_lib::agents::{discover_agents_matching, discover_agents_with_asset};
 use sentra_lib::interfaces::{AssetType, ProviderData, ProviderModel, ProviderProbeRequest};
 use sentra_lib::protocol::{
     ModelRequestParams, WireProtocol, probe_model_request, probe_model_request_with_prompt,
@@ -108,7 +108,7 @@ async fn collect_model_records() -> SentraResult<Vec<ModelRecord>> {
 
 async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>> {
     let mut records = Vec::new();
-    for agent in discover_agents(home) {
+    for agent in discover_agents_with_asset(home, AssetType::Provider) {
         let agent_title = agent.title().to_string();
         for asset in agent.get_assets(AssetType::Provider)? {
             for provider in provider_items(asset.runtime_data_async().await?)? {
@@ -120,7 +120,7 @@ async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>>
                 let base_url = provider.base_url.clone();
                 let has_api_key = provider.api_key.is_some();
                 let raw_provider_id = provider.raw_provider_id.clone().or(provider.provider_id);
-                let mut provider_record = ProviderRecord {
+                let provider_record = ProviderRecord {
                     name: provider.name.clone(),
                     raw_provider_id,
                     base_url: provider.base_url.clone().unwrap_or_default(),
@@ -140,8 +140,6 @@ async fn collect_model_records_at(home: &Path) -> SentraResult<Vec<ModelRecord>>
                         .collect(),
                     temporary: false,
                 };
-                merge_fetched_models(&mut provider_record);
-
                 for model in provider_record.models.iter().filter(|model| model.enabled) {
                     records.push(ModelRecord {
                         agent_name: agent.name().to_string(),
@@ -187,7 +185,7 @@ async fn collect_model_catalog_at(home: &Path) -> SentraResult<ModelCatalog> {
     let mut agents = Vec::new();
     let mut gateways = Vec::<ProviderRecord>::new();
     let mut seen_gateways = BTreeSet::new();
-    for agent in discover_agents(home) {
+    for agent in discover_agents_with_asset(home, AssetType::Provider) {
         let mut probe_requests = Vec::new();
         let mut has_provider_asset = false;
         for asset in agent.get_assets(AssetType::Provider)? {
@@ -363,10 +361,7 @@ fn mutate_provider_at(
     ) -> SentraResult<sentra_lib::interfaces::AssetMutationResult>,
 ) -> SentraResult<()> {
     let target = canonical_agent_target(agent_name);
-    for agent in discover_agents(home) {
-        if target != Some(agent.name()) {
-            continue;
-        }
+    for agent in discover_agents_matching(home, |agent_name| target == Some(agent_name)) {
         for asset in agent.get_assets(AssetType::Provider)? {
             let result = apply(asset.as_ref())?;
             if result.changed {
