@@ -147,76 +147,94 @@ async fn collect_model_inventory_from_agents(
     let mut seen_gateways = BTreeSet::new();
     for agent in discovered_agents {
         let agent_title = agent.title().to_string();
-        let mut probe_requests = Vec::new();
-        let mut supports_provider_write = false;
-        for asset in agent.get_assets(AssetType::Provider)? {
-            supports_provider_write |= asset.supports_provider_write();
-            let requests = asset.provider_requests(PROBE_MODEL_PLACEHOLDER);
-            if !requests.is_empty() {
-                probe_requests.extend(requests.clone());
-            }
-            for provider in provider_items(asset.runtime_data_async().await?)? {
-                if provider.provider_type != sentra_lib::interfaces::ProviderType::Gateway {
-                    continue;
+        let collected: SentraResult<()> = async {
+            let mut probe_requests = Vec::new();
+            let mut supports_provider_write = false;
+            for asset in agent.get_assets(AssetType::Provider)? {
+                supports_provider_write |= asset.supports_provider_write();
+                let requests = asset.provider_requests(PROBE_MODEL_PLACEHOLDER);
+                if !requests.is_empty() {
+                    probe_requests.extend(requests.clone());
                 }
-                let provider_type = provider_type_label(provider.provider_type);
-                let account = provider_account_label(provider.account.as_ref());
-                let base_url = provider.base_url.clone().unwrap_or_default();
-                let has_api_key = provider.api_key.is_some();
-                if base_url.trim().is_empty() {
-                    continue;
-                }
-                let raw_provider_id = provider
-                    .raw_provider_id
-                    .clone()
-                    .or_else(|| provider.provider_id.clone());
-                let gateway_key = provider_key(&base_url, provider.api_key.as_deref());
-                let models = provider
-                    .models
-                    .iter()
-                    .filter(|model| model.enabled)
-                    .map(|model| ModelChoice {
-                        id: model.id.clone(),
-                        name: model.name.clone().unwrap_or_else(|| model.id.clone()),
-                        enabled: model.enabled,
-                        status: ModelProbeStatus::Testing,
-                        protocol: provider.protocol,
-                    })
-                    .collect::<Vec<_>>();
+                for provider in provider_items(asset.runtime_data_async().await?)? {
+                    if provider.provider_type != sentra_lib::interfaces::ProviderType::Gateway {
+                        continue;
+                    }
+                    let provider_type = provider_type_label(provider.provider_type);
+                    let account = provider_account_label(provider.account.as_ref());
+                    let base_url = provider.base_url.clone().unwrap_or_default();
+                    let has_api_key = provider.api_key.is_some();
+                    if base_url.trim().is_empty() {
+                        continue;
+                    }
+                    let raw_provider_id = provider
+                        .raw_provider_id
+                        .clone()
+                        .or_else(|| provider.provider_id.clone());
+                    let gateway_key = provider_key(&base_url, provider.api_key.as_deref());
+                    let models = provider
+                        .models
+                        .iter()
+                        .filter(|model| model.enabled)
+                        .map(|model| ModelChoice {
+                            id: model.id.clone(),
+                            name: model.name.clone().unwrap_or_else(|| model.id.clone()),
+                            enabled: model.enabled,
+                            status: ModelProbeStatus::Testing,
+                            protocol: provider.protocol,
+                        })
+                        .collect::<Vec<_>>();
 
-                push_model_records(
-                    &mut records,
-                    &agent,
-                    &agent_title,
-                    &provider,
-                    &provider_type,
-                    &account,
-                    base_url.clone(),
-                    has_api_key,
-                    &models,
-                );
+                    push_model_records(
+                        &mut records,
+                        &agent,
+                        &agent_title,
+                        &provider,
+                        &provider_type,
+                        &account,
+                        base_url.clone(),
+                        has_api_key,
+                        &models,
+                    );
 
-                if !seen_gateways.insert(gateway_key) {
-                    continue;
+                    if !seen_gateways.insert(gateway_key) {
+                        continue;
+                    }
+                    let provider_record = ProviderRecord {
+                        name: provider.name,
+                        raw_provider_id,
+                        base_url: base_url.clone(),
+                        api_key: provider.api_key,
+                        enabled: provider.enabled,
+                        models,
+                        temporary: false,
+                    };
+                    gateways.push(provider_record);
                 }
-                let provider_record = ProviderRecord {
-                    name: provider.name,
-                    raw_provider_id,
-                    base_url: base_url.clone(),
-                    api_key: provider.api_key,
-                    enabled: provider.enabled,
-                    models,
-                    temporary: false,
-                };
-                gateways.push(provider_record);
             }
+            if supports_provider_write {
+                catalog_agents.push(AgentProviderEntry {
+                    agent_name: agent.name().to_string(),
+                    agent_title: agent.title().to_string(),
+                    probe_requests,
+                });
+            }
+            Ok(())
         }
-        if supports_provider_write {
-            catalog_agents.push(AgentProviderEntry {
-                agent_name: agent.name().to_string(),
-                agent_title: agent.title().to_string(),
-                probe_requests,
-            });
+        .await;
+        if let Err(err) = collected {
+            feedback::status_line(
+                Status::Warning,
+                format!(
+                    "{}: {}",
+                    agent_title,
+                    t(
+                        "provider inventory collection failed, agent skipped",
+                        "供应商信息采集失败，已跳过该 Agent"
+                    )
+                ),
+            );
+            feedback::metadata(&[(t("Cause", "原因"), err.to_string())]);
         }
     }
     Ok((
@@ -2381,6 +2399,45 @@ mod tests {
         .unwrap();
 
         assert_eq!(seen, ["claude-cli"]);
+    }
+
+    #[test]
+    fn model_inventory_skips_agent_with_corrupt_provider_config() {
+        let home = tempfile::tempdir().unwrap();
+        let claude_home = home.path().join(".claude");
+        std::fs::create_dir_all(&claude_home).unwrap();
+        std::fs::write(
+            claude_home.join("settings.json"),
+            r#"{"env": {"ANTHROPIC_BASE_URL": "https://example.test"}"#,
+        )
+        .unwrap();
+
+        let codex_home = home.path().join(".codex");
+        std::fs::create_dir_all(&codex_home).unwrap();
+        std::fs::write(
+            codex_home.join("config.toml"),
+            r#"model_provider = "test"
+model = "gpt-test"
+
+[model_providers.test]
+name = "Test"
+base_url = "https://provider.example.test/v1"
+experimental_bearer_token = "sk-test"
+"#,
+        )
+        .unwrap();
+
+        let (records, _) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(collect_model_inventory_at(home.path()))
+            .unwrap();
+
+        assert!(records.iter().any(|record| {
+            record.agent_name == "codex-cli"
+                && record.base_url.as_deref() == Some("https://provider.example.test/v1")
+        }));
     }
 
     fn assert_cell_fg(backend: &TestBackend, text: &str, color: Color) {

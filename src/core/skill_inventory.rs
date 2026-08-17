@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
-use sentra_lib::agents::{Agent, discover_agents};
+use futures::future::join_all;
+use sentra_lib::agents::{Agent, AgentDiscoveryOptions, discover_agents_with_asset_and_options};
 use sentra_lib::interfaces::{AssetMutationResult, AssetType, SkillData};
 use sentra_lib::{SentraError, SentraResult};
 
+use crate::cli::feedback::{self, Status};
 use crate::cli::i18n::t;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,9 +65,29 @@ pub(crate) fn grouped_skill_rows(
 pub(crate) async fn collect_skill_inventories(
     home: &std::path::Path,
 ) -> SentraResult<Vec<AgentSkillInventory>> {
+    let agents = discover_skill_agents(home);
     let mut inventories = Vec::new();
-    for agent in discover_agents(home) {
-        inventories.push(inventory_for_agent(&agent).await?);
+    for (agent, result) in agents
+        .iter()
+        .zip(join_all(agents.iter().map(inventory_for_agent)).await)
+    {
+        match result {
+            Ok(inventory) => inventories.push(inventory),
+            Err(err) => {
+                feedback::status_line(
+                    Status::Warning,
+                    format!(
+                        "{}: {}",
+                        agent.title(),
+                        t(
+                            "skill inventory collection failed, agent skipped",
+                            "技能信息采集失败，已跳过该 Agent"
+                        )
+                    ),
+                );
+                feedback::metadata(&[(t("Cause", "原因"), err.to_string())]);
+            }
+        }
     }
     inventories.sort_by(|left, right| {
         left.agent_name
@@ -73,6 +95,36 @@ pub(crate) async fn collect_skill_inventories(
             .then(left.agent_home.cmp(&right.agent_home))
     });
     Ok(inventories)
+}
+
+pub(crate) fn discover_skill_inventory_summaries(
+    home: &std::path::Path,
+) -> Vec<AgentSkillInventory> {
+    let mut inventories = discover_skill_agents(home)
+        .into_iter()
+        .map(|agent| AgentSkillInventory {
+            agent_name: agent.name().to_string(),
+            agent_title: agent.title().to_string(),
+            agent_home: agent.home().to_path_buf(),
+            skills: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    inventories.sort_by(|left, right| {
+        left.agent_name
+            .cmp(&right.agent_name)
+            .then(left.agent_home.cmp(&right.agent_home))
+    });
+    inventories
+}
+
+fn discover_skill_agents(home: &std::path::Path) -> Vec<Agent> {
+    discover_agents_with_asset_and_options(
+        home,
+        AssetType::Skill,
+        AgentDiscoveryOptions {
+            skip_install_probe: true,
+        },
+    )
 }
 
 async fn inventory_for_agent(agent: &Agent) -> SentraResult<AgentSkillInventory> {
@@ -119,7 +171,7 @@ fn mutate_agent_skill<F>(
 where
     F: Fn(&dyn sentra_lib::interfaces::ErasedAsset) -> SentraResult<AssetMutationResult>,
 {
-    let agent = discover_agents(home)
+    let agent = discover_skill_agents(home)
         .into_iter()
         .find(|agent| agent.name() == agent_name)
         .ok_or_else(|| {
