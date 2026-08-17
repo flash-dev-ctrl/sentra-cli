@@ -15,11 +15,12 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use sentra_lib::interfaces::RiskSeverity;
 use sentra_lib::risks::{RiskAsset, RiskScanner, ScanReport};
 use sentra_lib::{SentraError, SentraResult};
+use unicode_width::UnicodeWidthStr;
 
 use crate::cli::args::ScanChecker;
 use crate::cli::i18n::t;
@@ -28,14 +29,15 @@ use crate::core::scan_support::{
 };
 use crate::core::skill_inventory::{
     AgentSkillInventory, SkillInventoryRow, collect_skill_inventories, delete_skill_from_agent,
-    grouped_skill_rows, install_skill_to_agent,
+    discover_skill_inventory_summaries, grouped_skill_rows, install_skill_to_agent,
 };
 use crate::tui::theme;
 
 const DEFAULT_FOOTER: &str =
     "Tab focus  / search  Space one  a group  Ctrl+A all  r invert  s scan";
+const AGENT_FOOTER: &str = "Enter manage  j/k move  / search  q/Esc quit";
 const HELP_FOOTER_PRIMARY: &str = "Space one  a group  Ctrl+A all  r invert  s scan  Ctrl+S rescan";
-const HELP_FOOTER_SECONDARY: &str = "i install  d delete  Tab focus  / search  q/Esc quit";
+const HELP_FOOTER_SECONDARY: &str = "i install  d delete  Tab focus  / search  Esc back  q quit";
 const MUTATION_SPINNER_TICK: Duration = Duration::from_millis(120);
 
 pub(crate) async fn run() -> SentraResult<()> {
@@ -57,15 +59,17 @@ pub(crate) async fn run() -> SentraResult<()> {
             .to_string(),
         )
     })?;
-    let inventories = collect_skill_inventories(&home).await?;
-    let mut app = SkillManagerApp::new(home, inventories);
+    let inventories = discover_skill_inventory_summaries(&home);
+    let mut app = SkillManagerApp::from_discovered_agents(home, inventories);
     app.run().await
 }
 
 struct SkillManagerApp {
     home: PathBuf,
     inventories: Vec<AgentSkillInventory>,
+    mode: SkillManagerMode,
     agent_focus: usize,
+    agent_scroll: usize,
     skill_focus: usize,
     selected: BTreeSet<usize>,
     focus: FocusPane,
@@ -77,6 +81,13 @@ struct SkillManagerApp {
     skill_scroll: usize,
     status: String,
     reports: BTreeMap<String, ScanReport>,
+    inventories_loaded: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SkillManagerMode {
+    AgentSelect,
+    Manage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,14 +108,29 @@ enum SkillListEntry {
 }
 
 impl SkillManagerApp {
+    #[cfg(test)]
     fn new(home: PathBuf, inventories: Vec<AgentSkillInventory>) -> Self {
+        Self::with_inventory_state(home, inventories, true)
+    }
+
+    fn from_discovered_agents(home: PathBuf, inventories: Vec<AgentSkillInventory>) -> Self {
+        Self::with_inventory_state(home, inventories, false)
+    }
+
+    fn with_inventory_state(
+        home: PathBuf,
+        inventories: Vec<AgentSkillInventory>,
+        inventories_loaded: bool,
+    ) -> Self {
         Self {
             home,
             inventories,
+            mode: SkillManagerMode::AgentSelect,
             agent_focus: 0,
+            agent_scroll: 0,
             skill_focus: 0,
             selected: BTreeSet::new(),
-            focus: FocusPane::Skills,
+            focus: FocusPane::Agents,
             agent_search: String::new(),
             skill_search: String::new(),
             search_mode: false,
@@ -113,6 +139,7 @@ impl SkillManagerApp {
             skill_scroll: 0,
             status: t("Ready", "就绪").to_string(),
             reports: BTreeMap::new(),
+            inventories_loaded,
         }
     }
 
@@ -153,25 +180,67 @@ impl SkillManagerApp {
             return;
         }
 
-        let [header, body, footer] = Layout::vertical([
+        match self.mode {
+            SkillManagerMode::AgentSelect => self.render_agent_select(frame, area),
+            SkillManagerMode::Manage => self.render_manage(frame, area),
+        }
+    }
+
+    fn render_agent_select(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let popup = centered_rect(area, 84, 22);
+        frame.render_widget(Clear, popup);
+        let [header, list, detail, footer] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(6),
             Constraint::Length(2),
+        ])
+        .areas(popup);
+
+        let subtitle = if self.search_mode || !self.agent_search.is_empty() {
+            format!("/ {}: {}", t("agents", "Agent"), self.agent_search)
+        } else if self.status != t("Ready", "就绪") {
+            self.status.clone()
+        } else {
+            t(
+                "Choose an agent to manage its skills",
+                "选择要管理技能的 Agent",
+            )
+            .to_string()
+        };
+        self.render_panel_header(frame, header, t("Skill Manager", "技能管理器"), &subtitle);
+        self.render_agents(frame, list);
+        self.render_agent_summary(frame, detail);
+        self.render_footer(frame, footer);
+    }
+
+    fn render_manage(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let [header, body, footer] = Layout::vertical([
+            Constraint::Length(3),
             Constraint::Min(10),
             Constraint::Length(if self.show_help { 2 } else { 1 }),
         ])
         .areas(area);
         self.render_header(frame, header);
 
-        let [agents, skills, details] = Layout::horizontal([
-            Constraint::Percentage(22),
-            Constraint::Percentage(38),
-            Constraint::Percentage(40),
-        ])
-        .spacing(1)
-        .areas(body);
-        self.render_agents(frame, agents);
+        let [skills, details] =
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .spacing(1)
+                .areas(body);
         self.render_skills(frame, skills);
         self.render_details(frame, details);
         self.render_footer(frame, footer);
+    }
+
+    fn render_panel_header(&self, frame: &mut Frame<'_>, area: Rect, title: &str, subtitle: &str) {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(title.to_string()).style(title_style()),
+                Line::from(subtitle.to_string()).style(muted_style()),
+            ])
+            .style(body_style()),
+            area,
+        );
     }
 
     fn render_header(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -179,7 +248,7 @@ impl SkillManagerApp {
             "{}  {}: {}",
             t("Skill Manager", "技能管理器"),
             t("Agent", "Agent"),
-            self.current_agent_name().unwrap_or("-")
+            self.current_agent_title().unwrap_or("-")
         );
         let status = if self.search_mode {
             match self.focus {
@@ -200,27 +269,30 @@ impl SkillManagerApp {
         );
     }
 
-    fn render_agents(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_agents(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let visible = self.visible_agent_indices();
+        let visible_height = area.height.saturating_sub(2).max(1) as usize;
+        let focus_pos = visible
+            .iter()
+            .position(|index| *index == self.agent_focus)
+            .unwrap_or(0);
+        self.agent_scroll =
+            scroll_for_focus(focus_pos, self.agent_scroll, visible_height, visible.len());
         let items = visible
             .iter()
-            .map(|index| {
+            .enumerate()
+            .skip(self.agent_scroll)
+            .take(visible_height)
+            .map(|(display_index, index)| {
                 let agent = &self.inventories[*index];
-                let pointer = if *index == self.agent_focus {
-                    "> "
-                } else {
-                    "  "
-                };
-                let line = Line::from(vec![
-                    Span::raw(pointer),
-                    Span::raw(agent.agent_name.as_str()),
-                    Span::raw(format!(" ({})", agent.skills.len())),
-                ]);
-                if *index == self.agent_focus {
-                    ListItem::new(line.style(focus_style()))
-                } else {
-                    ListItem::new(line.style(body_style()))
-                }
+                agent_select_item(
+                    *index == self.agent_focus,
+                    self.focus == FocusPane::Agents,
+                    display_index + 1,
+                    agent,
+                    area.width,
+                    self.inventories_loaded,
+                )
             })
             .collect::<Vec<_>>();
         frame.render_widget(
@@ -233,6 +305,38 @@ impl SkillManagerApp {
                 t("Agents", "Agent"),
                 self.focus == FocusPane::Agents,
             )),
+            area,
+        );
+    }
+
+    fn render_agent_summary(&self, frame: &mut Frame<'_>, area: Rect) {
+        let selected = self
+            .visible_agent_indices()
+            .contains(&self.agent_focus)
+            .then(|| self.inventories.get(self.agent_focus))
+            .flatten();
+        let lines = selected
+            .map(|agent| {
+                vec![
+                    Line::from(agent.agent_title.clone()).style(title_style()),
+                    labeled(t("ID", "ID"), &agent.agent_name),
+                    labeled(
+                        t("Skills", "技能"),
+                        &if self.inventories_loaded {
+                            agent.skills.len().to_string()
+                        } else {
+                            t("load after selection", "选择后加载").to_string()
+                        },
+                    ),
+                    labeled(t("Home", "主目录"), &agent.agent_home.display().to_string()),
+                ]
+            })
+            .unwrap_or_else(|| vec![Line::from(t("No agent selected", "未选择 Agent"))]);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(t("Current", "当前"), false))
+                .style(body_style())
+                .wrap(Wrap { trim: false }),
             area,
         );
     }
@@ -309,8 +413,10 @@ impl SkillManagerApp {
         number_width: usize,
         row: &'a SkillInventoryRow,
     ) -> ListItem<'a> {
+        let selected = index == self.skill_focus;
+        let focused = self.focus == FocusPane::Skills;
         let pointer = if index == self.skill_focus {
-            "> "
+            "→ "
         } else {
             "  "
         };
@@ -326,7 +432,7 @@ impl SkillManagerApp {
             .unwrap_or(0);
         let has_findings = finding_count > 0;
         let mut spans = vec![
-            Span::styled(pointer, focus_pointer_style(index == self.skill_focus)),
+            Span::styled(pointer, focus_pointer_style(selected, focused)),
             Span::styled(format!("{display_number:>number_width$}. "), muted_style()),
             Span::styled(
                 marker,
@@ -342,14 +448,14 @@ impl SkillManagerApp {
             ));
         }
         let mut line = Line::from(spans);
-        if index == self.skill_focus {
-            line = line.patch_style(Style::default().add_modifier(Modifier::BOLD));
+        if selected {
+            line = line.patch_style(switch_row_style(selected, focused));
         } else if row.installed {
             line = line.patch_style(body_style());
         } else if !row.installed {
             line = line.patch_style(muted_style());
         }
-        ListItem::new(line)
+        ListItem::new(line).style(switch_row_style(selected, focused))
     }
 
     fn render_details(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -469,7 +575,12 @@ impl SkillManagerApp {
     }
 
     fn render_footer(&self, frame: &mut Frame<'_>, area: Rect) {
-        let lines = if self.show_help {
+        let lines = if self.mode == SkillManagerMode::AgentSelect {
+            vec![Line::from(t(
+                AGENT_FOOTER,
+                "Enter 管理  j/k 移动  / 搜索  q/Esc 退出",
+            ))]
+        } else if self.show_help {
             vec![
                 Line::from(t(
                     HELP_FOOTER_PRIMARY,
@@ -477,7 +588,7 @@ impl SkillManagerApp {
                 )),
                 Line::from(t(
                     HELP_FOOTER_SECONDARY,
-                    "i 安装  d 删除  / 搜索  q/Esc 退出",
+                    "i 安装  d 删除  Tab 焦点  / 搜索  Esc 返回  q 退出",
                 )),
             ]
         } else {
@@ -500,12 +611,30 @@ impl SkillManagerApp {
         match key {
             KeyEvent {
                 code: KeyCode::Esc, ..
+            } => {
+                if self.mode == SkillManagerMode::Manage {
+                    self.mode = SkillManagerMode::AgentSelect;
+                    self.focus = FocusPane::Agents;
+                    self.search_mode = false;
+                    self.show_help = false;
+                    self.status = t("Ready", "就绪").to_string();
+                    Ok(AppAction::Continue)
+                } else {
+                    Ok(AppAction::Quit)
+                }
             }
-            | KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('q'),
                 modifiers: KeyModifiers::NONE,
                 ..
             } => Ok(AppAction::Quit),
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.mode == SkillManagerMode::AgentSelect => {
+                self.enter_selected_agent(redraw).await?;
+                Ok(AppAction::Continue)
+            }
             KeyEvent {
                 code: KeyCode::Char('?'),
                 ..
@@ -517,9 +646,12 @@ impl SkillManagerApp {
                 code: KeyCode::Char('/'),
                 ..
             } => {
-                if self.focus == FocusPane::Details {
-                    self.status =
-                        "Details are scroll-only; Tab to Agents or Skills to search.".to_string();
+                if self.mode == SkillManagerMode::Manage && self.focus == FocusPane::Details {
+                    self.status = t(
+                        "Details are scroll-only; Tab to Skills to search.",
+                        "详情仅可滚动；按 Tab 回到技能列表后搜索。",
+                    )
+                    .to_string();
                 } else {
                     self.search_mode = true;
                 }
@@ -528,11 +660,14 @@ impl SkillManagerApp {
             KeyEvent {
                 code: KeyCode::Tab, ..
             } => {
-                self.focus = match self.focus {
-                    FocusPane::Agents => FocusPane::Skills,
-                    FocusPane::Skills => FocusPane::Details,
-                    FocusPane::Details => FocusPane::Agents,
-                };
+                self.toggle_manage_focus();
+                Ok(AppAction::Continue)
+            }
+            KeyEvent {
+                code: KeyCode::Left | KeyCode::Right,
+                ..
+            } if self.mode == SkillManagerMode::Manage => {
+                self.toggle_manage_focus();
                 Ok(AppAction::Continue)
             }
             KeyEvent {
@@ -702,6 +837,55 @@ impl SkillManagerApp {
         }
     }
 
+    async fn enter_selected_agent<F>(&mut self, redraw: &mut F) -> SentraResult<()>
+    where
+        F: FnMut(&mut Self) -> SentraResult<()>,
+    {
+        if !self.visible_agent_indices().contains(&self.agent_focus) {
+            self.status = t("No matching agent.", "没有匹配的 Agent。").to_string();
+            return Ok(());
+        }
+        if !self.inventories_loaded {
+            let selected_agent = self
+                .inventories
+                .get(self.agent_focus)
+                .map(|agent| (agent.agent_name.clone(), agent.agent_home.clone()));
+            self.status = t("Loading skills...", "正在加载技能...").to_string();
+            redraw(self)?;
+            self.inventories = collect_skill_inventories(&self.home).await?;
+            self.inventories_loaded = true;
+            if let Some((agent_name, agent_home)) = selected_agent
+                && let Some(index) = self.inventories.iter().position(|agent| {
+                    agent.agent_name == agent_name && agent.agent_home == agent_home
+                })
+            {
+                self.agent_focus = index;
+            }
+        }
+        self.mode = SkillManagerMode::Manage;
+        self.focus = FocusPane::Skills;
+        self.skill_focus = 0;
+        self.skill_scroll = 0;
+        self.selected.clear();
+        self.detail_scroll = 0;
+        self.clamp_skill_focus();
+        if let Some(agent) = self.current_agent_title() {
+            self.status = format!("{}: {agent}", t("Managing skills for", "正在管理技能"));
+        }
+        Ok(())
+    }
+
+    fn toggle_manage_focus(&mut self) {
+        if self.mode == SkillManagerMode::AgentSelect {
+            self.focus = FocusPane::Agents;
+            return;
+        }
+        self.focus = match self.focus {
+            FocusPane::Skills => FocusPane::Details,
+            _ => FocusPane::Skills,
+        };
+    }
+
     fn toggle_selection(&mut self) {
         if self.focus != FocusPane::Skills {
             return;
@@ -819,6 +1003,14 @@ impl SkillManagerApp {
     }
 
     async fn scan_selected(&mut self, no_cache: bool) -> SentraResult<()> {
+        if self.mode != SkillManagerMode::Manage {
+            self.status = t(
+                "Press Enter to manage the selected agent first.",
+                "请先按 Enter 管理选中的 Agent。",
+            )
+            .to_string();
+            return Ok(());
+        }
         let rows = self.target_rows();
         if rows.is_empty() {
             self.status = t("No skills selected to scan.", "未选择要扫描的技能。").to_string();
@@ -854,6 +1046,14 @@ impl SkillManagerApp {
         F: FnMut(&mut Self) -> SentraResult<()>,
     {
         let agent_name = self.current_agent_name().unwrap_or("").to_string();
+        if self.mode != SkillManagerMode::Manage {
+            self.status = t(
+                "Press Enter to manage the selected agent first.",
+                "请先按 Enter 管理选中的 Agent。",
+            )
+            .to_string();
+            return Ok(());
+        }
         let rows = self
             .target_rows()
             .into_iter()
@@ -905,6 +1105,14 @@ impl SkillManagerApp {
         F: FnMut(&mut Self) -> SentraResult<()>,
     {
         let agent_name = self.current_agent_name().unwrap_or("").to_string();
+        if self.mode != SkillManagerMode::Manage {
+            self.status = t(
+                "Press Enter to manage the selected agent first.",
+                "请先按 Enter 管理选中的 Agent。",
+            )
+            .to_string();
+            return Ok(());
+        }
         let rows = self
             .target_rows()
             .into_iter()
@@ -984,6 +1192,7 @@ impl SkillManagerApp {
 
     async fn reload(&mut self) -> SentraResult<()> {
         self.inventories = collect_skill_inventories(&self.home).await?;
+        self.inventories_loaded = true;
         self.clamp_agent_focus();
         self.clamp_skill_focus();
         self.selected.clear();
@@ -1061,6 +1270,12 @@ impl SkillManagerApp {
             .get(self.agent_focus)
             .map(|agent| agent.agent_name.as_str())
     }
+
+    fn current_agent_title(&self) -> Option<&str> {
+        self.inventories
+            .get(self.agent_focus)
+            .map(|agent| agent.agent_title.as_str())
+    }
 }
 
 fn skill_manager_rule_load_output() -> RuleLoadOutput {
@@ -1112,9 +1327,11 @@ fn focus_style() -> Style {
     theme::focus_style()
 }
 
-fn focus_pointer_style(focused: bool) -> Style {
-    if focused {
-        theme::focus_style()
+fn focus_pointer_style(selected: bool, focused: bool) -> Style {
+    if selected && focused {
+        theme::selection_style()
+    } else if selected {
+        theme::inactive_selection_style()
     } else {
         muted_style()
     }
@@ -1157,10 +1374,95 @@ fn severity_style(severity: RiskSeverity) -> Style {
 }
 
 fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
+    let title = if focused {
+        Line::from(vec![
+            Span::styled("▶ ", focus_style()),
+            Span::styled(title, focus_style()),
+            Span::styled(format!(" [{}]", t("FOCUS", "焦点")), focus_style()),
+        ])
+    } else {
+        Line::from(title).style(title_style())
+    };
     Block::default()
         .borders(Borders::ALL)
-        .title(Line::from(title).style(title_style()))
+        .border_type(if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
+        .title(title)
         .border_style(theme::border_style(focused))
+}
+
+fn agent_select_item(
+    selected: bool,
+    focused: bool,
+    index: usize,
+    agent: &AgentSkillInventory,
+    area_width: u16,
+    inventories_loaded: bool,
+) -> ListItem<'static> {
+    let index_text = format!("{index}.");
+    let skill_count = inventories_loaded
+        .then(|| format!("[{} {}]", agent.skills.len(), t("skills", "技能")))
+        .unwrap_or_default();
+    let content_width = area_width.saturating_sub(2) as usize;
+    let title_width = content_width
+        .saturating_sub(usize::from(!skill_count.is_empty()) * 2)
+        .saturating_sub(index_text.len() + 1)
+        .saturating_sub(2)
+        .saturating_sub(UnicodeWidthStr::width(skill_count.as_str()))
+        .max(8);
+    let mut spans = vec![
+        Span::styled(format!("{index_text} "), muted_style()),
+        Span::styled(
+            pad_display_width(&agent.agent_title, title_width),
+            switch_text_style(selected, focused),
+        ),
+    ];
+    if !skill_count.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(skill_count, muted_style()));
+    }
+    ListItem::new(switch_line(selected, focused, spans)).style(switch_row_style(selected, focused))
+}
+
+fn switch_line(
+    selected: bool,
+    focused: bool,
+    spans: impl IntoIterator<Item = Span<'static>>,
+) -> Line<'static> {
+    let pointer = if selected { "→ " } else { "  " };
+    let pointer_style = if selected && focused {
+        theme::selection_style()
+    } else if selected {
+        theme::inactive_selection_style()
+    } else {
+        muted_style()
+    };
+    let mut line_spans = vec![Span::styled(pointer, pointer_style)];
+    line_spans.extend(spans);
+    Line::from(line_spans).style(switch_row_style(selected, focused))
+}
+
+fn switch_text_style(selected: bool, focused: bool) -> Style {
+    if selected && focused {
+        theme::selection_style()
+    } else if selected {
+        theme::inactive_selection_style()
+    } else {
+        body_style()
+    }
+}
+
+fn switch_row_style(selected: bool, focused: bool) -> Style {
+    if selected && focused {
+        theme::selection_style()
+    } else if selected {
+        theme::inactive_selection_style()
+    } else {
+        Style::default()
+    }
 }
 
 fn labeled(label: &str, value: &str) -> Line<'static> {
@@ -1211,6 +1513,68 @@ fn next_index(visible: &[usize], current: usize, delta: isize) -> Option<usize> 
         (pos + 1) % visible.len()
     };
     visible.get(next).copied()
+}
+
+fn scroll_for_focus(
+    focus: usize,
+    current_scroll: usize,
+    visible_height: usize,
+    item_count: usize,
+) -> usize {
+    if visible_height == 0 || item_count == 0 {
+        return 0;
+    }
+    let max_scroll = item_count.saturating_sub(visible_height);
+    let current_scroll = current_scroll.min(max_scroll);
+    let scroll = if focus < current_scroll {
+        focus
+    } else if focus >= current_scroll + visible_height {
+        focus + 1 - visible_height
+    } else {
+        current_scroll
+    };
+    scroll.min(max_scroll)
+}
+
+fn pad_display_width(value: &str, width: usize) -> String {
+    let truncated = truncate_display_width(value, width);
+    let padding = width.saturating_sub(UnicodeWidthStr::width(truncated.as_str()));
+    format!("{truncated}{}", " ".repeat(padding))
+}
+
+fn truncate_display_width(value: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= max_width {
+        return value.to_string();
+    }
+    if max_width <= 1 {
+        return "…".chars().take(max_width).collect();
+    }
+    let target = max_width - 1;
+    let mut result = String::new();
+    let mut width = 0;
+    for ch in value.chars() {
+        let ch_width = UnicodeWidthStr::width(ch.to_string().as_str());
+        if width + ch_width > target {
+            break;
+        }
+        width += ch_width;
+        result.push(ch);
+    }
+    result.push('…');
+    result
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 fn read_key() -> SentraResult<KeyEvent> {
@@ -1271,6 +1635,7 @@ mod tests {
     }
 
     fn app_with_report() -> SkillManagerApp {
+        crate::cli::i18n::init(Some("en"));
         let inventories = vec![
             AgentSkillInventory {
                 agent_name: "codex-cli".to_string(),
@@ -1321,10 +1686,13 @@ mod tests {
                 errors: Vec::new(),
             },
         );
+        app.mode = SkillManagerMode::Manage;
+        app.focus = FocusPane::Skills;
         app
     }
 
     fn app_with_many_installed_and_available() -> SkillManagerApp {
+        crate::cli::i18n::init(Some("en"));
         let inventories = vec![
             AgentSkillInventory {
                 agent_name: "augment".to_string(),
@@ -1353,45 +1721,190 @@ mod tests {
                     .collect(),
             },
         ];
-        SkillManagerApp::new(PathBuf::from("/home"), inventories)
+        let mut app = SkillManagerApp::new(PathBuf::from("/home"), inventories);
+        app.mode = SkillManagerMode::Manage;
+        app.focus = FocusPane::Skills;
+        app
     }
 
     #[test]
-    fn skill_manager_renders_three_columns_and_risk_details_at_80x24() {
+    fn skill_manager_starts_with_agent_select_and_numbered_agents() {
+        crate::cli::i18n::init(Some("en"));
+        let inventories = vec![
+            AgentSkillInventory {
+                agent_name: "codex-cli".to_string(),
+                agent_title: "Codex".to_string(),
+                agent_home: PathBuf::from("/home/codex"),
+                skills: vec![skill("alpha", "/codex/alpha")],
+            },
+            AgentSkillInventory {
+                agent_name: "sentra".to_string(),
+                agent_title: "Sentra".to_string(),
+                agent_home: PathBuf::from("/home/sentra"),
+                skills: Vec::new(),
+            },
+        ];
+        let mut app = SkillManagerApp::from_discovered_agents(PathBuf::from("/home"), inventories);
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let raw = buffer_text(terminal.backend());
+        let rendered = compact_text(&raw);
+        assert_eq!(app.mode, SkillManagerMode::AgentSelect);
+        assert!(!app.inventories_loaded);
+        assert!(rendered.contains(&compact_text(t(
+            "Choose an agent to manage its skills",
+            "选择要管理技能的 Agent"
+        ))));
+        assert!(rendered.contains(&compact_text("1. Codex")), "{rendered}");
+        assert!(rendered.contains(&compact_text("2. Sentra")), "{rendered}");
+        assert!(rendered.contains(&compact_text(t("load after selection", "选择后加载"))));
+        assert!(!rendered.contains(&compact_text("[1 skills]")));
+        assert!(rendered.contains(&compact_text(t(
+            AGENT_FOOTER,
+            "Enter 管理  j/k 移动  / 搜索  q/Esc 退出"
+        ))));
+    }
+
+    #[test]
+    fn skill_manager_agent_page_shows_loading_status() {
+        crate::cli::i18n::init(Some("en"));
+        let inventories = vec![AgentSkillInventory {
+            agent_name: "codex-cli".to_string(),
+            agent_title: "Codex".to_string(),
+            agent_home: PathBuf::from("/home/codex"),
+            skills: Vec::new(),
+        }];
+        let mut app = SkillManagerApp::from_discovered_agents(PathBuf::from("/home"), inventories);
+        app.status = t("Loading skills...", "正在加载技能...").to_string();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let rendered = compact_text(&buffer_text(terminal.backend()));
+        assert!(rendered.contains(&compact_text(t("Loading skills...", "正在加载技能..."))));
+    }
+
+    #[test]
+    fn skill_manager_enter_opens_agent_page_and_esc_returns_to_agents() {
+        let mut app = app_with_report();
+        app.mode = SkillManagerMode::AgentSelect;
+        app.focus = FocusPane::Agents;
+        let mut redraw = |_app: &mut SkillManagerApp| Ok(());
+
+        block_on(app.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &mut redraw,
+        ))
+        .unwrap();
+
+        assert_eq!(app.mode, SkillManagerMode::Manage);
+        assert_eq!(app.focus, FocusPane::Skills);
+
+        block_on(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &mut redraw))
+            .unwrap();
+
+        assert_eq!(app.mode, SkillManagerMode::AgentSelect);
+        assert_eq!(app.focus, FocusPane::Agents);
+    }
+
+    #[test]
+    fn skill_manager_does_not_open_agent_page_without_a_visible_agent() {
+        let mut app = app_with_report();
+        app.mode = SkillManagerMode::AgentSelect;
+        app.focus = FocusPane::Agents;
+        app.agent_search = "missing-agent".to_string();
+        app.clamp_agent_focus();
+        let mut redraw = |_app: &mut SkillManagerApp| Ok(());
+
+        block_on(app.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &mut redraw,
+        ))
+        .unwrap();
+
+        assert_eq!(app.mode, SkillManagerMode::AgentSelect);
+        assert_eq!(app.status, "No matching agent.");
+    }
+
+    #[test]
+    fn skill_manager_focus_switch_uses_active_and_inactive_selection_backgrounds() {
+        let mut app = app_with_report();
+
+        let active = switch_row_style(true, app.focus == FocusPane::Skills);
+        app.toggle_manage_focus();
+        let inactive = switch_row_style(true, app.focus == FocusPane::Skills);
+
+        assert_eq!(app.focus, FocusPane::Details);
+        assert_eq!(active.bg, theme::selection_style().bg);
+        assert_eq!(inactive.bg, theme::inactive_selection_style().bg);
+        assert_ne!(active.bg, inactive.bg);
+        assert_ne!(theme::border_style(true), theme::border_style(false));
+    }
+
+    #[test]
+    fn skill_manager_labels_the_focused_panel_and_uses_a_thick_border() {
         let mut app = app_with_report();
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
-        assert!(rendered.contains("Agents"));
-        assert!(rendered.contains("Skills"));
-        assert!(rendered.contains("Details"));
-        assert!(rendered.contains("installed"));
-        assert!(rendered.contains("available"));
-        assert!(rendered.contains(" 1. [ ] alpha"));
-        assert!(rendered.contains("alpha (1 finding)"), "{rendered}");
-        assert!(!rendered.contains("[ ] I "));
-        assert!(!rendered.contains("[ ] A "));
-        let nine = rendered
-            .lines()
-            .find(|line| line.contains("skill-008"))
-            .unwrap();
-        let ten = rendered
-            .lines()
-            .find(|line| line.contains("skill-009"))
-            .unwrap();
+        let skills_focused = compact_text(&buffer_text(terminal.backend()));
+        assert!(
+            skills_focused.contains("┏▶Skills[FOCUS]"),
+            "{skills_focused}"
+        );
+        assert!(!skills_focused.contains("▶Details[FOCUS]"));
+
+        app.toggle_manage_focus();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let details_focused = compact_text(&buffer_text(terminal.backend()));
+        assert!(
+            details_focused.contains("┏▶Details[FOCUS]"),
+            "{details_focused}"
+        );
+        assert!(!details_focused.contains("▶Skills[FOCUS]"));
+    }
+
+    #[test]
+    fn skill_manager_renders_two_column_skill_page_and_risk_details_at_80x24() {
+        let mut app = app_with_report();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let raw = buffer_text(terminal.backend());
+        let rendered = compact_text(&raw);
+        assert!(rendered.contains(&compact_text(t("Skills", "技能"))));
+        assert!(rendered.contains(&compact_text(t("Details", "详情"))));
+        assert!(rendered.contains("Agent:Codex"));
+        assert!(rendered.contains(&compact_text(t("installed", "已安装"))));
+        assert!(rendered.contains(&compact_text(t("available", "可用"))));
+        assert!(rendered.contains(&compact_text("1. [ ] alpha")));
+        assert!(
+            rendered.contains(&compact_text("alpha (1 finding)")),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("[]I"));
+        assert!(!rendered.contains("[]A"));
+        let nine = raw.lines().find(|line| line.contains("skill-008")).unwrap();
+        let ten = raw.lines().find(|line| line.contains("skill-009")).unwrap();
         assert_eq!(nine.find("[ ]"), ten.find("[ ]"));
-        assert!(rendered.contains("Scan"));
-        assert!(rendered.contains("# 1/1  Prompt risk"));
-        assert!(rendered.contains("Prompt risk"));
+        assert!(rendered.contains(&compact_text(t("Scan", "扫描"))));
+        assert!(rendered.contains(&compact_text("# 1/1  Prompt risk")));
+        assert!(rendered.contains(&compact_text("Prompt risk")));
     }
 
     #[test]
     fn skill_manager_aligns_number_column_to_largest_visible_number() {
         let mut app = app_with_report();
-        app.skill_focus = 99;
+        app.skill_focus = 0;
         let backend = TestBackend::new(80, 120);
         let mut terminal = Terminal::new(backend).unwrap();
 
@@ -1418,10 +1931,10 @@ mod tests {
 
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
+        let rendered = compact_text(&buffer_text(terminal.backend()));
         let focused = rendered
             .lines()
-            .find(|line| line.contains("> 100. [ ] skill-099"));
+            .find(|line| line.contains("100.[]skill-099"));
         assert!(focused.is_some(), "{rendered}");
     }
 
@@ -1436,10 +1949,10 @@ mod tests {
         app.move_focus(-1);
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
+        let rendered = compact_text(&buffer_text(terminal.backend()));
         let focused_line = rendered
             .lines()
-            .position(|line| line.contains(">  80. [ ] skill-079"))
+            .position(|line| line.contains("80.[]skill-079"))
             .unwrap();
         let bottom_border = rendered
             .lines()
@@ -1459,9 +1972,9 @@ mod tests {
         app.move_focus(1);
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
-        assert!(rendered.contains("installed"));
-        assert!(rendered.contains(">   3. [ ] skill-002"), "{rendered}");
+        let rendered = compact_text(&buffer_text(terminal.backend()));
+        assert!(rendered.contains(&compact_text(t("installed", "已安装"))));
+        assert!(rendered.contains("3.[]skill-002"), "{rendered}");
     }
 
     #[test]
@@ -1473,10 +1986,10 @@ mod tests {
 
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
+        let rendered = compact_text(&buffer_text(terminal.backend()));
         let focused = rendered
             .lines()
-            .find(|line| line.contains("> 73. [ ] available-013"));
+            .find(|line| line.contains("73.[]available-013"));
         assert!(focused.is_some(), "{rendered}");
     }
 
@@ -1497,14 +2010,13 @@ mod tests {
 
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
+        let rendered = compact_text(&buffer_text(terminal.backend()));
         let lines = rendered.lines().collect::<Vec<_>>();
-        assert!(lines[0].contains("Skill Manager"));
-        assert!(lines[0].contains("Agent: codex"));
-        assert!(lines[1].contains("Loading risk rules 1/3"));
-        assert!(lines[2].contains("Agents"));
-        assert!(lines[2].contains("Skills"));
-        assert!(lines[2].contains("Details"));
+        assert!(lines[0].contains(&compact_text(t("Skill Manager", "技能管理器"))));
+        assert!(lines[0].contains("Agent:Codex"));
+        assert!(lines[1].contains(&compact_text("Loading risk rules 1/3")));
+        assert!(lines[3].contains(&compact_text(t("Skills", "技能"))));
+        assert!(lines[3].contains(&compact_text(t("Details", "详情"))));
     }
 
     #[test]
@@ -1515,8 +2027,13 @@ mod tests {
 
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
-        assert_eq!(rendered.matches("Tab focus  / search").count(), 1);
+        let rendered = compact_text(&buffer_text(terminal.backend()));
+        assert_eq!(
+            rendered
+                .matches(&compact_text("Tab focus  / search"))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -1528,10 +2045,10 @@ mod tests {
 
         terminal.draw(|frame| app.render(frame)).unwrap();
 
-        let rendered = buffer_text(terminal.backend());
+        let rendered = compact_text(&buffer_text(terminal.backend()));
         let lines = rendered.lines().collect::<Vec<_>>();
-        assert!(lines[22].contains(HELP_FOOTER_PRIMARY));
-        assert!(lines[23].contains(HELP_FOOTER_SECONDARY));
+        assert!(lines[22].contains(&compact_text(HELP_FOOTER_PRIMARY)));
+        assert!(lines[23].contains(&compact_text(HELP_FOOTER_SECONDARY)));
     }
 
     #[test]
@@ -1539,6 +2056,12 @@ mod tests {
         assert!(DEFAULT_FOOTER.len() <= 80);
         assert!(HELP_FOOTER_PRIMARY.len() <= 80);
         assert!(HELP_FOOTER_SECONDARY.len() <= 80);
+    }
+
+    #[test]
+    fn agent_scroll_is_clamped_when_search_reduces_the_list() {
+        assert_eq!(scroll_for_focus(0, 20, 8, 2), 0);
+        assert_eq!(scroll_for_focus(9, 0, 4, 10), 6);
     }
 
     #[test]
@@ -1668,7 +2191,7 @@ mod tests {
         assert!(!app.search_mode);
         assert_eq!(
             app.status,
-            "Details are scroll-only; Tab to Agents or Skills to search."
+            "Details are scroll-only; Tab to Skills to search."
         );
     }
 
@@ -1729,6 +2252,13 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    fn compact_text(value: &str) -> String {
+        value
+            .chars()
+            .filter(|ch| *ch == '\n' || !ch.is_whitespace())
+            .collect()
     }
 
     fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
